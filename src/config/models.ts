@@ -19,7 +19,7 @@ export type TaskKey = "checklist" | "readEveryPolicy" | "fullReading" | "secondO
 export const TASKS: Record<TaskKey, { model: ModelKey; effort: Effort; maxTokens: number; uiToggle: boolean }> = {
   checklist: { model: "haiku", effort: "high", maxTokens: 8000, uiToggle: false }, // Step 7
   readEveryPolicy: { model: "haiku", effort: "low", maxTokens: 4000, uiToggle: false }, // Step 9
-  fullReading: { model: "haiku", effort: "high", maxTokens: 12000, uiToggle: true }, // Step 11
-  secondOpinion: { model: "haiku", effort: "high", maxTokens: 10000, uiToggle: true }, // Step 13
+  fullReading: { model: "haiku", effort: "high", maxTokens: 16000, uiToggle: true }, // Step 11
+  secondOpinion: { model: "haiku", effort: "high", maxTokens: 16000, uiToggle: true }, // Step 13
   findObligations: { model: "haiku", effort: "high", maxTokens: 10000, uiToggle: false }, // Step 22
 };

@@ -270,8 +270,8 @@ export const TASKS = {
   // thinking counts toward maxTokens on these models, so the limits are generous
   checklist:        { model: "haiku", effort: "high", maxTokens: 8000,  uiToggle: false },  // Step 7
   readEveryPolicy:  { model: "haiku", effort: "low",  maxTokens: 4000,  uiToggle: false },  // Step 9
-  fullReading:      { model: "haiku", effort: "high", maxTokens: 12000, uiToggle: true  },  // Step 11
-  secondOpinion:    { model: "haiku", effort: "high", maxTokens: 10000, uiToggle: true  },  // Step 13
+  fullReading:      { model: "haiku", effort: "high", maxTokens: 16000, uiToggle: true  },  // Step 11
+  secondOpinion:    { model: "haiku", effort: "high", maxTokens: 16000, uiToggle: true  },  // Step 13
   findObligations:  { model: "haiku", effort: "high", maxTokens: 10000, uiToggle: false },  // Step 22
 } as const;
 ```
@@ -410,7 +410,9 @@ For each bundle, one call per Medi-Cal policy (251 × bundles calls).
 
 Instructions:
 
-> You are screening one policy document. Below are numbered requirements. Report which requirements this policy addresses, even partly, and where. If you are unsure, include it. Give the section address as written in the document (for example "II.C.2" or "Glossary: Hospice Care"). Mark `strength` "direct" if the policy clearly speaks to the requirement, "maybe" if it is only related. If none apply, return an empty list. Do not explain.
+> You are screening one policy document. Below are numbered requirements. Report the requirements for which this document contains a specific passage that a careful reader should look at, and where. Give the section address as written in the document (for example "II.C.2" or "Glossary: Hospice Care"). Mark `strength` "direct" if the passage states the requirement or part of it, or sets a different rule for the same thing; "maybe" if it is about the same specific matter but you are not sure. Sharing a broad subject is not enough: a requirement about one particular service, form, deadline or situation is not addressed by a document that only deals with covered services, providers, payment or authorization in general. If none apply, return an empty list. Do not explain.
+
+(The first wording said "even partly … if you are unsure, include it". On the first real run that produced 74 "maybe" policies for one question, which made "maybe" useless as a signal.)
 
 Output: `{ hits: { itemId, address, strength: "direct" | "maybe" }[] }`.
 
@@ -446,7 +448,7 @@ Message layout (this exact order makes caching work, and is shared with Step 13)
 
 Task instructions:
 
-> For each requirement, decide whether the policy documents state it. Rules: (1) Evidence must come from a policy that applies to Medi-Cal and from text that applies to Medi-Cal members; text under a Medicare-only or OneCare-only heading does not count. (2) Read whole documents: check definitions, and look for conditions, exceptions or other passages that narrow or contradict the evidence. (3) Different wording is fine only if it means the same thing; say so in the reason. (4) "conflict" is rare: use it only when a policy speaks about the same specific action or subject as the requirement and says something that cannot be true together with it (for example a different deadline for the same action), and quote that text. Silence, a general statement, or text about a different subject is "not_covered". (5) If a requirement includes a number or deadline, the quote must show it. (6) Quotes must be exact contiguous text, at most 80 words each, no ellipses, at most 3 per requirement. (7) If nothing in the documents states it, the status is "not_covered". Do not guess.
+> For each requirement, decide whether the policy documents state it. Rules: (1) Evidence must come from a policy that applies to Medi-Cal and from text that applies to Medi-Cal members; text under a Medicare-only or OneCare-only heading does not count. (2) Read whole documents: check definitions, and look for conditions, exceptions or other passages that narrow or contradict the evidence. (3) Different wording is fine only if it means the same thing; say so in the reason. (4) "conflict" means a policy sets a different rule for the same action or subject (a different deadline, amount or responsible party, or permission for something the requirement does not allow); a looser rule is a conflict even when both could be satisfied at once. Quote that text. Silence, a general statement, or text about a different subject is "not_covered". (5) If a requirement includes a number or deadline, the quote must show it. (6) Quotes must be exact contiguous text, at most 80 words each, no ellipses, at most 3 per requirement. (7) If nothing in the documents states it, the status is "not_covered". Do not guess.
 
 Output: `{ items: { itemId, status: "covered" | "not_covered" | "conflict", wording: "same" | "equivalent", evidence: { policyId, quote }[], reason: string }[] }` (reason ≤ 40 words). `wording` is "equivalent" when the policy uses different terms from the requirement (for example "hospice physician" for "hospice medical director"); the reason must then name both terms. A `covered` item with `wording: "equivalent"` gets flag `wording_differs`. It stays `covered`, but it sorts above other covered answers so Alex confirms the judgment call herself.
 
@@ -479,7 +481,7 @@ Runs **immediately after** Steps 11–12 for the same chunk, one call per questi
 
 Instructions:
 
-> Another analyst proposed the answers below. Your job is to find reasons each answer is wrong. For "covered": does the quoted text, read together with the Glossary definitions of its terms, really prove the whole requirement? Is its scope narrower? Does another passage add a condition or exception? Is it the right program? For "conflict": is the quoted text about the same specific action as the requirement, and truly incompatible with it? For "not_covered" or "needs_review": search the documents for evidence that was missed, and quote it exactly. Answer for every requirement.
+> Another analyst proposed the answers below. Your job is to find reasons each answer is wrong. For "covered": does the quoted text, read together with the Glossary definitions of its terms, really prove the whole requirement? Is its scope narrower? Does another passage add a condition or exception? Is it the right program? For "conflict": is the quoted text about the same action or subject, and does it set a different rule? A looser rule counts even when both could be satisfied at once. For "not_covered" or "needs_review": search the documents for evidence that was missed, and quote it exactly. Answer for every requirement.
 
 Output: `{ items: { itemId, agrees: boolean, proposedStatus: "covered" | "not_covered" | "conflict", reason: string, newEvidence: { policyId, quote }[] }[] }`.
 
@@ -501,7 +503,7 @@ Resolution (plain code). First run `newEvidence` through Step 12's checks 1–2.
 For every item that is `not_covered` with no evidence:
 
 1. Check that Step 9 completed for all 251 policies for the item's bundle. Re-run any missing calls.
-2. Take one more look, once per group: collect, for the group's still-open items, any policy flagged by a re-run read, any candidate left out in Step 10, and the top `rescueKeywordHits` (3) keyword hits, excluding policies already read for the group. Pack the most-pointed-to ones into one extra chunk and run Steps 11–13 again for the open items only. Count an item as rescued if it is no longer open.
+2. Take one more look, once per group: collect, for the group's still-open items, any policy flagged by a re-run read, any candidate left out in Step 10, and the top `rescueKeywordHits` (3) keyword hits, excluding policies already read for the group. Pack the most-pointed-to ones (among equals, the best keyword match for an open item first) into one extra chunk and run Steps 11–13 again for the open items only. Count an item as rescued if it is no longer open.
 3. Otherwise attach the trail:
 
 ```ts

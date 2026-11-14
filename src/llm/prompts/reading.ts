@@ -53,7 +53,7 @@ Rules:
 1. Evidence must come from a policy that applies to Medi-Cal and from text that applies to Medi-Cal members.
 2. Read whole documents. Check definitions in the Glossary. Look for conditions, exceptions or other passages that narrow or contradict the evidence, and take them into account.
 3. Different wording is fine only if it means the same thing. Then set "wording" to "equivalent" and name both terms in the reason (for example: policy says "hospice physician", requirement says "hospice medical director"). If the policy's term is narrower than the requirement, the requirement is not covered.
-4. "conflict" is rare. Use it only when a policy speaks about the same specific action or subject as the requirement and says something that cannot be true together with it (for example a different deadline for the same action). Quote the conflicting text. Silence, a general statement, or text about a different subject is not a conflict: that is "not_covered".
+4. "conflict" means a policy sets a different rule for the same action or subject as the requirement: a different deadline, amount or responsible party, or permission for something the requirement does not allow. A looser rule is a conflict even when both could be satisfied at once: a policy that allows 60 days where the requirement allows 14 conflicts with it. Quote the conflicting text. Silence, a general statement, or text about a different subject is not a conflict: that is "not_covered".
 5. If a requirement includes a number or a deadline, a quote must show that number.
 6. Quotes: exact contiguous text copied from one policy, at most 80 words each, no ellipses, at most 3 per requirement. Quote the sentence or list entry that states the requirement, not a heading. Inside the JSON, write any double quote that is part of a quote as \\".
 7. If nothing in the documents states the requirement, the status is "not_covered" with no evidence. Do not guess, and do not stretch related text to fit.
@@ -114,7 +114,7 @@ ${blocks}
 
 For each requirement:
 - If the proposal is "covered": does the quoted text, read together with the Glossary definitions of the terms it uses, really prove the WHOLE requirement? Is its scope narrower than the requirement? Does another passage add a condition or an exception? Does it apply to Medi-Cal members? Does any number or deadline match?
-- If the proposal is "conflict": is the quoted text about the same specific action or subject as the requirement, and truly incompatible with it? Text about a different subject is not a conflict.
+- If the proposal is "conflict": is the quoted text about the same action or subject as the requirement, and does it set a different rule (a different deadline, amount or responsible party, or permission for something the requirement does not allow)? A looser policy rule is a conflict even when both could be satisfied at once. Text about a different subject is not a conflict.
 - If the proposal is "not_covered" or "needs_review": search the documents for evidence that was missed. If you find some, quote it exactly in "newEvidence" (exact contiguous policy text, at most 80 words each, at most 3; write any double quote inside it as \\").
 - "agrees" is true only if you would give the same answer after your own reading. "proposedStatus" is the answer you would give: "covered", "not_covered" or "conflict".
 - "reason" is at most 40 words and must be specific.

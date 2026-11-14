@@ -68,7 +68,8 @@ export function costOf(model: ModelKey, u: Usage): number {
   return (u.input * p.input + u.cacheWrite * p.cacheWrite + u.cacheRead * p.cacheRead + u.output * p.output) / 1_000_000;
 }
 
-export type TaskUsage = Usage & { calls: number; savedCalls: number; cost: number };
+/** `cutOff`: replies that hit the length limit and had to be asked for again with more room. */
+export type TaskUsage = Usage & { calls: number; savedCalls: number; cost: number; cutOff: number };
 
 /** Running totals for one run, per task. */
 export class UsageTracker {
@@ -76,7 +77,7 @@ export class UsageTracker {
   private listeners = new Set<() => void>();
 
   record(task: TaskKey, model: ModelKey, usage: Usage, fromSavedCache: boolean) {
-    const t = (this.byTask[task] ??= { calls: 0, savedCalls: 0, input: 0, cacheWrite: 0, cacheRead: 0, output: 0, cost: 0 });
+    const t = this.usage(task);
     if (fromSavedCache) {
       t.savedCalls++;
     } else {
@@ -88,6 +89,14 @@ export class UsageTracker {
       t.cost += costOf(model, usage);
     }
     for (const l of this.listeners) l();
+  }
+
+  private usage(task: TaskKey): TaskUsage {
+    return (this.byTask[task] ??= { calls: 0, savedCalls: 0, input: 0, cacheWrite: 0, cacheRead: 0, output: 0, cost: 0, cutOff: 0 });
+  }
+
+  recordCutOff(task: TaskKey) {
+    this.usage(task).cutOff++;
   }
 
   get totalCost(): number {
@@ -302,6 +311,7 @@ export function createLLM(deps: LLMDeps) {
         if (raw?.stop_reason === "max_tokens") {
           // ran out of room (thinking counts toward the limit): try once more with twice the room
           lastProblem = `the reply was cut off at the ${maxTokens}-token limit`;
+          req.tracker?.recordCutOff(req.task);
           maxTokens *= 2;
         } else {
           messages.push({ role: "assistant", content: [{ type: "text", text: text || "(empty reply)" }] });

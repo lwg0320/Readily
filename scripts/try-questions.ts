@@ -103,7 +103,7 @@ async function main() {
       if (it.trail) {
         const t = it.trail;
         const terms = t.exactTerms.map((x) => `“${x.term}”: ${x.hits} ${x.hits === 1 ? "policy" : "policies"}`).join(" · ");
-        console.log(wrap(`not found after reading ${t.policiesRead} Medi-Cal policies${terms ? ` · exact search ${terms}` : ""}${t.closest ? ` · closest: ${t.closest.policyId} §${t.closest.address}, p.${t.closest.page}` : ""}`, "      "));
+        console.log(wrap(`not found after reading ${t.policiesRead} Medi-Cal policies${terms ? ` · exact search ${terms}` : ""}${t.closest ? ` · closest: ${t.closest.policyId} §${t.closest.address}, p.${t.closest.page}` : ""}${t.skippedCandidates.length ? ` · weaker candidates not read in full: ${t.skippedCandidates.length}` : ""}`, "      "));
       }
     }
     console.log();
@@ -134,6 +134,11 @@ async function main() {
     console.log(`Q${id}: ${items} checks · ${rows.length} policies pointed to, ${rows.filter((r) => r[1].strong).length} of them must-reads`);
     console.log(wrap(`must-read: ${rows.filter((r) => r[1].strong).map(tag).join(", ") || "none"}`, "    "));
     console.log(wrap(`weaker: ${rows.filter((r) => !r[1].strong).map(tag).join(", ") || "none"}`, "    "));
+    const perCheck = (run.checklists.find((c) => c.question.number === q.number)?.items ?? []).map((it) => {
+      const mine = run.foundBy.filter((f) => f.itemId === it.id);
+      return `${it.id.split("-")[1]}: ${mine.filter((f) => f.foundBy.includes("haiku-direct")).length}/${mine.filter((f) => f.foundBy.includes("haiku-maybe")).length}`;
+    });
+    console.log(wrap(`per check, policies the Step 9 reader called direct/maybe — ${perCheck.join(" · ")}`, "    "));
   }
   console.log();
   run.documentSets.forEach((d, i) => {
@@ -148,7 +153,7 @@ async function main() {
   console.log(`Time: ${seconds}s${throttled ? ` · the API asked us to slow down ${throttled} time(s)` : ""}\n`);
   console.log("Cost by step (live calls only; saved calls are free):");
   for (const [task, u] of Object.entries(tracker.byTask)) {
-    console.log(`  ${task.padEnd(16)} ${String(u!.calls).padStart(4)} live, ${String(u!.savedCalls).padStart(4)} saved · in ${u!.input} · cache write ${u!.cacheWrite} · cache read ${u!.cacheRead} · out ${u!.output} · $${u!.cost.toFixed(4)}`);
+    console.log(`  ${task.padEnd(16)} ${String(u!.calls).padStart(4)} live, ${String(u!.savedCalls).padStart(4)} saved · in ${u!.input} · cache write ${u!.cacheWrite} · cache read ${u!.cacheRead} · out ${u!.output}${u!.cutOff ? ` · ${u!.cutOff} cut off and repeated` : ""} · $${u!.cost.toFixed(4)}`);
   }
   console.log(`  TOTAL $${tracker.totalCost.toFixed(4)}`);
 

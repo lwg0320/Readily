@@ -281,9 +281,15 @@ export async function runEvidence(args: EvidenceArgs): Promise<EvidenceRun> {
         for (const id of skippedFor.get(item.id) ?? []) vote(id, "", item.requirement);
         for (const top of library.search.topPolicies(item.requirement, PIPELINE.rescueKeywordHits)) vote(top.policyId, top.best.address, item.requirement);
       }
+      // most-pointed-to first; among equals, the one that matches an open requirement best
+      const keywordRank = new Map<string, number>();
+      for (const item of open) {
+        library.search.topPolicies(item.requirement, 25).forEach((top, i) => keywordRank.set(top.policyId, Math.min(i, keywordRank.get(top.policyId) ?? 99)));
+      }
+      const rankOf = (id: string) => keywordRank.get(id) ?? 99;
       const docs: ChunkPolicy[] = [];
       let used = 0;
-      for (const [policyId, v] of [...votes].sort((a, b) => b[1].n - a[1].n || a[0].localeCompare(b[0]))) {
+      for (const [policyId, v] of [...votes].sort((a, b) => b[1].n - a[1].n || rankOf(a[0]) - rankOf(b[0]) || a[0].localeCompare(b[0]))) {
         const policy = library.policies.get(policyId)!;
         const long = policy.tokenEstimate > PIPELINE.longPolicyTokens;
         const text = long ? excerptPolicy(policy, v.addresses, v.queries.filter(Boolean), library.search, Math.floor(PIPELINE.maxPolicyTokensPerCall * 0.4)) : policy.canonicalText;
