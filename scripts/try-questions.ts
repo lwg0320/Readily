@@ -20,8 +20,10 @@ const flag = (name: string) => {
 const asModel = (v: string | undefined, fallback: ModelKey): ModelKey => (v === "opus" || v === "haiku" ? v : fallback);
 const numbers = args.filter((a) => /^\d+$/.test(a)).map(Number);
 const all = args.includes("--all");
+// one line per question, plus only the checks that need a look; the default for --all
+const brief = args.includes("--brief") || (all && !args.includes("--full"));
 if (!numbers.length && !all) {
-  console.error("Usage: npm run try -- 10 11 25   (question numbers)\n       npm run try -- --all       (the whole questionnaire)\nOptions: --reading=opus  --review=opus  --fresh (ignore saved calls)");
+  console.error("Usage: npm run try -- 10 11 25   (question numbers)\n       npm run try -- --all       (the whole questionnaire)\nOptions: --reading=opus  --review=opus  --fresh (ignore saved calls)  --brief / --full (how much to print)");
   process.exit(1);
 }
 
@@ -82,7 +84,23 @@ async function main() {
   const seconds = Math.round((Date.now() - started) / 1000);
 
   const title = new Map(questions.map((q) => [String(q.number), q.text]));
-  for (const r of sortByRisk(run.results)) {
+  if (brief) {
+    for (const r of run.results) {
+      const n = (st: ItemResult["status"]) => r.items.filter((i) => i.status === st).length;
+      const counts = [n("covered") && `${n("covered")} ✓`, n("not_covered") && `${n("not_covered")} ✗`, n("conflict") && `${n("conflict")} !`, n("needs_review") && `${n("needs_review")} ?`].filter(Boolean).join(" ");
+      console.log(`Q${r.parentId.padEnd(3)} ${VERDICT[r.verdict].padEnd(13)} ${counts.padEnd(16)} ${r.suggestedCitation}`);
+      for (const it of r.items) {
+        const failed = it.flags.filter((f) => f.code === "analysis_failed" || f.code === "list_count_mismatch");
+        if (it.status === "conflict" || it.status === "needs_review" || it.tieBreak || failed.length) {
+          const cite = it.evidence[0] ? ` · ${formatCitation(it.evidence[0])}` : "";
+          const numbers = it.flags.filter((f) => f.code === "number_mismatch" || f.code === "number_not_shown").map((f) => f.detail).join("; ");
+          console.log(wrap(`${MARK[it.status]} ${it.item.id} ${it.status}${cite}${numbers ? ` · ${numbers}` : ""}${it.reviewer && !it.reviewer.agrees ? ` · second opinion disagreed: ${it.reviewer.reason}` : ""}${it.tieBreak ? ` · tie-break: ${it.tieBreak.status} — ${it.tieBreak.reason}` : ""}${failed.map((f) => ` · ${f.detail}`).join("")}`, "      "));
+        }
+      }
+    }
+    console.log();
+  }
+  for (const r of brief ? [] : sortByRisk(run.results)) {
     console.log("─".repeat(100));
     console.log(`Q${r.parentId}  ${VERDICT[r.verdict]}   suggested answer: ${r.suggestedAnswer ?? "— (you decide)"}${r.suggestedCitation ? `   citation: ${r.suggestedCitation}` : ""}`);
     console.log(wrap(title.get(r.parentId) ?? "", "  "));
@@ -115,7 +133,7 @@ async function main() {
   console.log("═".repeat(100));
   console.log("How the policies were found (direct / maybe = the Step 9 reader · exact = exact search · keyword = keyword search)\n");
   const parentOf = new Map(run.checklists.flatMap((c) => c.items.map((i) => [i.id, String(c.question.number)] as const)));
-  for (const q of questions) {
+  for (const q of brief ? [] : questions) {
     const id = String(q.number);
     const perPolicy = new Map<string, { direct: number; maybe: number; exact: number; keyword: number; strong: boolean }>();
     for (const f of run.foundBy) {
@@ -142,10 +160,18 @@ async function main() {
     console.log(wrap(`per check, policies the Step 9 reader called direct/maybe — ${perCheck.join(" · ")}`, "    "));
   }
   console.log();
-  run.documentSets.forEach((d, i) => {
+  if (brief) {
+    const sets = run.documentSets;
+    const k = (n: number) => `${Math.round(n / 1000)}k`;
+    console.log(`  ${sets.length} sets of policies read in full (${sets.filter((d) => d.lastLook).length} of them last looks) · about ${k(sets.reduce((a, d) => a + d.tokens, 0))} tokens in all · largest ${k(Math.max(0, ...sets.map((d) => d.tokens)))}`);
+    const strong = new Map<string, number>();
+    for (const f of run.foundBy) if (f.strong) strong.set(f.policyId, (strong.get(f.policyId) ?? 0) + 1);
+    console.log(wrap(`must-read policies (checks pointing to each): ${[...strong].sort((a, b) => b[1] - a[1]).map(([id, n]) => `${id}×${n}`).join(", ")}`, "  "));
+  }
+  (brief ? [] : run.documentSets).forEach((d, i) => {
     console.log(wrap(`Set ${i + 1}${d.lastLook ? " (last look)" : ""} · Q${d.parentIds.join(", Q")} · about ${Math.round(d.tokens / 1000)}k tokens: ${d.policies.map((p) => `${p.policyId}${p.mode === "excerpt" ? " (excerpts)" : ""}`).join(", ")}`, "  "));
   });
-  for (const l of run.leftOut) console.log(wrap(`Not read in full for Q${l.parentIds.join(", Q")} (weaker candidates that did not fit): ${l.policyIds.join(", ")}`, "  "));
+  for (const l of brief ? [] : run.leftOut) console.log(wrap(`Not read in full for Q${l.parentIds.join(", Q")} (weaker candidates that did not fit): ${l.policyIds.join(", ")}`, "  "));
 
   console.log("\n" + "═".repeat(100));
   const counts = run.results.reduce<Record<string, number>>((a, r) => ((a[r.verdict] = (a[r.verdict] ?? 0) + 1), a), {});
