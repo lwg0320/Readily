@@ -14,7 +14,7 @@ The full design is in [ARCHITECTURE.md](ARCHITECTURE.md).
 | 1 | Document preparation (`npm run prep`) | Done |
 | 2 | Shared code and unit tests (`npm test`) | Done |
 | 3 | API client (`npm run check:key`) | Done |
-| 4 | Questionnaire pipeline (`npm run try -- 10 11 25`, or `--all`) | Done; checked against the real API on questions 10, 11 and 25 |
+| 4 | Questionnaire pipeline (`npm run try -- 10 11 25`, or `--all`) | Done; checked against the real API on all 64 questions (about $2.20 and 12 minutes on Haiku from scratch) |
 | 5 | Questionnaire screens and form export | Not started |
 | 6–8 | Policy Guide, accuracy toggles, replay, accuracy page | Not started |
 

@@ -51,7 +51,8 @@ export const readerSchema = z.object({
     z.object({
       itemId: z.string(),
       status: z.enum(["covered", "not_covered", "conflict"]),
-      wording: z.enum(["same", "equivalent"]).default("same"),
+      // anything other than a plain "same" (for example "broader") means the words differ
+      wording: z.preprocess((v) => (v === undefined || v === null || v === "same" ? "same" : "equivalent"), z.enum(["same", "equivalent"])),
       evidence: evidenceList,
       reason: z.string().default(""),
     }),

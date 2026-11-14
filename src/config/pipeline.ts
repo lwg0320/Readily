@@ -4,7 +4,7 @@ export const PIPELINE = {
   bundles: 3, // Step 9: checklist bundles per questionnaire
   maxPolicyTokensPerCall: 60_000,
   longPolicyTokens: 25_000, // above this, send excerpts instead of the whole policy
-  concurrency: 10, // parallel API calls
+  concurrency: 16, // parallel API calls (no slow-down was requested at 10 on a full run)
   keywordHitsPerItem: 2,
   maxGroupSize: 7, // questions per group (Steps 11–15)
   commonTermPolicies: 15, // an exact search term found in more policies than this is too common to use

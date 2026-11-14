@@ -105,3 +105,15 @@ describe("a long checklist (Steps 11 and 13)", () => {
     expect(run.documentSets[0].parentIds).toEqual(["25"]);
   });
 });
+
+describe("reply parsing", () => {
+  it("accepts an unexpected 'wording' value instead of losing the reply", async () => {
+    const { readerSchema } = await import("../src/llm/prompts/reading");
+    const parsed = readerSchema.parse({ items: [
+      { itemId: "Q8-01", status: "covered", wording: "broader", evidence: [], reason: "" },
+      { itemId: "Q8-02", status: "covered", evidence: [{ policy: "GG.1503", text: "quoted" }, { quote: "no policy named" }], reason: "" },
+    ] });
+    expect(parsed.items.map((i) => i.wording)).toEqual(["equivalent", "same"]);
+    expect(parsed.items[1].evidence).toEqual([{ policyId: "GG.1503", quote: "quoted" }]);
+  });
+});
