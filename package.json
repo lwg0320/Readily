@@ -1,0 +1,20 @@
+{
+  "name": "readily-module",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "prep": "tsx scripts/prep/index.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "minisearch": "^7.1.0",
+    "pdf-lib": "^1.17.1",
+    "pdfjs-dist": "^4.10.38"
+  },
+  "devDependencies": {
+    "@types/node": "^22.9.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3"
+  }
+}

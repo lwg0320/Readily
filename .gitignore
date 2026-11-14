@@ -3,3 +3,6 @@ dist
 .env*
 .DS_Store
 __MACOSX
+# The original documents. Only needed to re-run `npm run prep`; the generated
+# data and the PDFs the app shows are committed under public/.
+source/

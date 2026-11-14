@@ -42,7 +42,7 @@ The source folder is `Readily/`. Copy it to `source/Readily/` in the repo. Ignor
 - Below that the outline is `A.` → `1.` → `a.` → `i.`, shown by indentation.
 - 366 policies have a glossary laid out as a two-column table with a `Term   Definition` header row. Term names often wrap over several lines in the left column.
 - Page footers look like `Page 2 of 18   GG.1503: <title>   Revised Date: 09/01/2024`, sometimes followed by a second line continuing the title.
-- Policies are small: average ≈ 4.8k tokens, largest (AA.1000) ≈ 48k tokens. All 251 Medi-Cal policies total ≈ 1.2M tokens.
+- Policies are small. Measured on the prepared text with the app's estimate (characters ÷ 4): the 251 Medi-Cal policies total ≈ 1.46M tokens, average ≈ 5.8k, largest AA.1000 ≈ 62k, and only two exceed 25k (AA.1000, GG.1600). Real token counts are likely somewhat lower.
 
 **Known traps (use these as test cases)**
 
@@ -84,7 +84,7 @@ No backend, no database server, no embeddings, no Batch API.
 /
   ARCHITECTURE.md
   package.json, vite.config.ts, tailwind.config.js, tsconfig.json
-  source/Readily/                  # the given folder, untouched
+  source/Readily/                  # the given folder, untouched (git-ignored; only needed to re-run prep)
   scripts/prep/
     index.ts                       # runs everything below in order
     extract.ts                     # pdftotext wrapper, page splitting
@@ -167,14 +167,13 @@ Classify each top-level section by its title:
 
 **Outline inside body sections.** Walk lines in order and keep a stack of labels. A new item starts when a line begins (after indentation) with `A.`–`Z.`, `1.`–`99.`, `a.`–`z.` or `i.`–`xx.` followed by spaces and text. Use indentation depth and the previous sibling's label to decide the level (for example `i.` after `h.` at the same indent is a letter; `i.` deeper than `a.` is a Roman sub-item). Each item gets an address such as `II.C.2` and records `pageStart`, `pageEnd`.
 
-**Program scope.** For each lettered or numbered item whose first line is heading-like (≤ 14 words and ends with `:` or has no terminal period), or which begins with `For Medicare`, `For OneCare`, `For Medi-Cal`:
-- contains Medicare or OneCare and not Medi-Cal → `scope: "other"`
-- contains Medi-Cal and not Medicare/OneCare → `scope: "medi-cal"`
-- otherwise → inherit from the parent (default `"both"`)
+**Program scope.** Only in body sections (never in References). The rule is deliberately narrow, because a heading like "Medicare Crossover" inside a Medi-Cal policy is still Medi-Cal content and must stay citable. An item gets its own scope in two cases:
+- Its text begins with `For Medicare`, `For OneCare` or `For Medi-Cal`. Look at its first 8 words: only Medicare/OneCare → `"other"`; only Medi-Cal → `"medi-cal"`; both → no own scope.
+- Its own text (before any child item) is heading-like (≤ 14 words, and ends with `:` or has no closing `.`/`;`) **and** names one program as its subject: it is just the program name (`OneCare`, `Medicare (OneCare)`), or starts with the program name and contains Eligibility / Requirement(s) / Member(s) / Benefit(s), or contains "for/applicable to <program>". Medicare/OneCare without Medi-Cal → `"other"`; Medi-Cal without the others → `"medi-cal"`.
 
-Children inherit their parent's scope. Test: `GG.1503` `II.B` is `"other"`, `II.C` is `"medi-cal"`.
+Otherwise the item inherits from its parent (default `"both"`). Children inherit their parent's scope. Test: `GG.1503` `II.B` is `"other"`, `II.C` is `"medi-cal"`, `II.F.2` ("For OneCare, and Medi-Cal primary Members…") is `"both"`.
 
-**Glossary.** For the table format, find the `Term   Definition` header row and take the column where `Definition` starts as the split column. For each following line, text left of that column is a term fragment and text right of it is definition text. A new entry starts when the left side is non-empty and the previous entry's definition already has text and the previous line's left side was empty; otherwise the left text continues the current term name. (Repeated `Term   Definition` rows at page tops are skipped.) Rebuild each entry as `Term: definition…` with its page range. For the `DEFINITIONS` format (AA.1000 style), an entry starts at a line matching `^[A-Z0-9][^:]{1,80}:\s`.
+**Glossary.** For the table format, the `Term   Definition` header row gives the term indent. The definition column cannot be read from the header: it drifts within a page and changes from page to page. So, for each line that starts at the term indent, estimate the definition column from the nearest lines on the same page (definition-only lines, or term lines with a clear gap), then split at a gap of two or more spaces near that column, or failing that at the word boundary closest to it (a long term can run up to one space short of its definition). Lines indented past the term indent are definition-only. A term-level line starts a **new entry** when the previous line was definition-only, or the term so far ends with a parenthesised abbreviation such as `(CMS)`, or the definition so far ends a sentence and the new fragment starts with a capital; otherwise it continues the current term (term names wrap over several lines). Repeated `Term   Definition` rows at page tops are skipped. Rebuild each entry as `Term: definition…`, one block per page it spans. Footers can take three lines (`GG.1330: <title>` above `Page 19 of 19`), and one policy (GG.1815) has stray numbering (`XI.  Member …`) in front of its terms; both are stripped. For the `DEFINITIONS` format (AA.1000 style), an entry starts at a line matching `^[A-Z0-9][^:]{1,80}:\s`.
 
 **References.** From the `references` section collect every APL number matching `APL\)?\s*(\d{2}-\d{3})` into `referencedApls`.
 
@@ -226,18 +225,18 @@ Per-page text (drop the `APL 25-008` / `Page N` header lines and footnote URL li
 
 **Form field map.** With `pdf-lib`, list every widget with its page, rectangle, field name, field type and on-states.
 - **Citation fields:** all text fields except those on page 1 whose top edge is above y = 300 (the header block). Sort by page, then top-to-bottom. Expect **64**; the *n*th is question *n*'s citation field.
-- **Yes/No pairs:** group button widgets into rows (same page, y within 6 pt) that contain a left widget near x ≈ 37 and a right widget near x ≈ 91, below the header block. Sort the rows by page, then top-to-bottom. Expect **64**; the *n*th row is question *n*. For each row, record every widget in it (the form has both a radio pair and an overlapping checkbox pair): `{ fieldName, widgetIndex, onState, side: "yes" | "no" }`.
+- **Yes/No pairs:** group button widgets into rows (same page, y within 6 pt) that contain a left widget near x ≈ 37 and a right widget near x ≈ 91, below the header block. Sort the rows by page, then top-to-bottom. Expect **64**; the *n*th row is question *n*. For each row, record every widget in it (the form has both a radio pair and an overlapping checkbox pair): `{ fieldName, fieldType: "radio" | "checkbox", widgetIndex, onState, side: "yes" | "no" }`. The stored map is `formMap: { number, citationField, yesNo: [...] }[]`. Self-check: the form's radio states are named `Yes_<n>` / `No_<n>`; where present, `<n>` must equal the question number (it does for all 63 rows that have one).
 - A Yes/No row can sit at the bottom of one page with its citation field at the top of the next. Zipping the two sorted lists by index handles this.
 - If either count is not 64, write `formMap: null` and print a warning. The app then offers only the CSV export.
 
 ### 5.5 Policy Guide (`guide.ts`) → `public/data/guides/ecm-2026-01.json`
 
-1. Read bookmarks with `pdfjs-dist` (`getOutline`, resolve each destination to a page). Drop wrapper titles (`ECM-Policy-Guide-January-2026`, `ECM-Policy-Guide-January-2026.pdf`, `CALAIM ENHANCED CARE MANAGEMENT POLICY GUIDE`, `ECM Policy Guide Edits`, `TABLE OF CONTENTS`, a bare `(Updated January 2026)`) and entries with no page. About 157 headings remain. Keep each heading's depth and build its `path` (titles of its ancestors).
-2. Extract page text with `pdftotext -layout`. Drop lines that are only a page number.
+1. Read bookmarks with `pdfjs-dist` (`getOutline`, resolve each destination to a page). Drop wrapper titles (`ECM-Policy-Guide-January-2026`, `ECM-Policy-Guide-January-2026.pdf`, `CALAIM ENHANCED CARE MANAGEMENT POLICY GUIDE`, `ECM Policy Guide Edits`, `TABLE OF CONTENTS`, a bare `(Updated January 2026)`) and entries with no page. 156 headings remain. Keep each heading's depth and build its `path` (titles of its ancestors).
+2. Extract page text with `pdftotext -layout`. **Lift out footnotes first:** each page's footnotes sit at the bottom as a number alone on a line (at the left margin, numbered consecutively through the document, 1–90) followed by text. Left in place they cut sentences that continue on the next page. Remove them from the page and re-attach them at the end of the section that is open at the bottom of that page, under a `Footnotes:` line, as `[Footnote 14, p.17] …`. Then drop lines that are only a page number.
 3. Locate each heading in its page's text (whitespace-insensitive match of the title). If not found, use the top of the page.
 4. **Extra section starts:** every line that begins with `(Updated <Month> <Year>)` and is not already a located heading becomes a section start. Its title is the line up to the first `:` (or the whole line). Its `path` is the path of the closest preceding bookmark heading. This catches the 13 inserted pages with no bookmarks (for example page 17, "Community Supports").
-5. Sort all starts by (page, line). A section's text runs to the next start. Drop sections with fewer than 20 words (pure headings); their titles remain in children's paths.
-6. For each section store: `id`, `title`, `path`, `pageStart`, `pageEnd`, `updated` (title or first line contains `(Updated`), `text` with `<<page N>>` markers, and `parentIntro` (first paragraph of the nearest ancestor section that has text, max 120 words).
+5. Sort all starts by (page, line). A section's text runs to the next start. Drop sections with fewer than 20 words (pure headings); their titles remain in children's paths. A bare `(Updated January 2026)` line is not a start; it belongs to the heading around it. Every path begins at its chapter (`IV. ECM POPULATIONS OF FOCUS`). Result for this Guide: 141 sections (156 bookmark headings + 5 marker starts − 20 pure headings), 21 flagged Updated.
+6. For each section store: `id`, `title`, `path`, `pageStart`, `pageEnd`, `updated` (title or first line contains `(Updated`), `source` (`bookmark` or `marker`), `wordCount`, `text` with `<<page N>>` markers, and `parentIntro` (first paragraph of the nearest ancestor that has text, max 120 words; resolve each ancestor by searching **backwards** from the section, because titles such as `C. Operational Guidance:` repeat).
 
 ### 5.6 Search index (`searchIndex.ts`) → `public/data/search-index.json`
 
@@ -252,7 +251,7 @@ One MiniSearch document per outline item of every **Medi-Cal** policy (merge ite
 - Canonical text of `GG.1503` contains `no later than thirty (30) calendar days` mapped to address `III.F.1`.
 - Questionnaire: 64 questions; Q25 `aplPages` = [6, 7]; form map has 64 citation fields and 64 Yes/No rows.
 - APL: 17 pages; `supersedes` = ["13-014"]; `date` = 2025-05-05.
-- Guide: between 150 and 200 sections; at least 20 flagged `updated`; a section titled like `(Updated January 2026) Community Supports` on page 17 whose text contains `Transitional Rent`.
+- Guide: between 120 and 200 sections (141 measured); at least 20 flagged `updated`; every bookmark heading located in the text; a section titled like `(Updated January 2026) Community Supports` on page 17 whose text contains `Transitional Rent`.
 - Exact search for `transitional rent` over all policies returns 0 hits.
 
 ---
