@@ -135,6 +135,8 @@ export type ItemResult = {
   evidence: Evidence[];
   readerReason: string;
   reviewer: { agrees: boolean; reason: string } | null;
+  /** Present when the full reading and the second opinion disagreed and a third reading settled it. */
+  tieBreak?: TieBreak;
   flags: Flag[];
   trail?: SearchTrail;
 };
@@ -169,5 +171,7 @@ export type ReviewDraft = {
   reason: string;
   newEvidence: { policyId: string; quote: string }[];
 };
+
+export type TieBreak = { status: "covered" | "not_covered" | "conflict"; reason: string };
 
 export type FoundBy = "haiku-direct" | "haiku-maybe" | "exact" | "keyword";

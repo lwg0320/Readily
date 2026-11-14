@@ -19,6 +19,7 @@ const idsIn = (task: string) => [...task.matchAll(/^(Q\d+-\d+):/gm)].map((m) => 
 
 const readings: string[][] = [];
 const reviews: string[][] = [];
+const tieBreaks: string[] = [];
 let run: EvidenceRun;
 
 beforeAll(async () => {
@@ -41,9 +42,19 @@ beforeAll(async () => {
         return n <= 7 ? { itemId: id, status: "covered", wording: "same", evidence: [{ policyId: "GG.1503", quote: SERVICES[n - 1] }], reason: "listed" } : { itemId: id, status: "not_covered", wording: "same", evidence: [], reason: "nothing" };
       }) });
     }
+    if (user.includes("TASK: TIE-BREAK")) {
+      const task = user.split("TASK: TIE-BREAK")[1];
+      tieBreaks.push(task);
+      // sides with the reader on Q25-05 and with the reviewer on Q25-06
+      return json({ items: idsIn(task).map((id) => ({ itemId: id, status: id === "Q25-05" ? "covered" : "not_covered", reason: "settled" })) });
+    }
     const ids = idsIn(user.split("TASK: SECOND OPINION")[1]);
     reviews.push(ids);
-    return json({ items: ids.map((id) => ({ itemId: id, agrees: true, proposedStatus: id === "Q25-08" ? "not_covered" : "covered", reason: "checked", newEvidence: [] })) });
+    return json({ items: ids.map((id) => {
+      // the reviewer objects to two answers; one of its replies also carries a malformed quote entry
+      if (id === "Q25-05" || id === "Q25-06") return { itemId: id, agrees: false, proposedStatus: "not_covered", reason: "the list entry alone does not prove it", newEvidence: [] };
+      return { itemId: id, agrees: true, proposedStatus: id === "Q25-08" ? "not_covered" : "covered", reason: "checked", newEvidence: id === "Q25-07" ? [{ section: "II.A", text: 5 }] : [] };
+    }) });
   };
   const llm = createLLM({ apiKey: () => "sk-ant-test", store: memoryStore(), fetchFn: fetchFn as any, sleep: async () => {} });
   run = await runEvidence({
@@ -68,11 +79,26 @@ describe("a long checklist (Steps 11 and 13)", () => {
   });
   it("so every requirement still gets an answer and a second opinion", () => {
     const r = run.results[0];
-    expect(r.items.map((i) => i.status)).toEqual(["covered", "covered", "covered", "covered", "covered", "covered", "covered", "not_covered"]);
+    expect(r.items.map((i) => i.status)).toEqual(["covered", "covered", "covered", "covered", "covered", "not_covered", "covered", "not_covered"]);
     expect(r.items.flatMap((i) => i.flags.map((f) => f.code))).not.toContain("analysis_failed");
     expect(r.verdict).toBe("partial");
     expect(new Set(reviews.flat())).toEqual(new Set(items.map((i) => i.id)));
     expect(r.items[1].evidence[0]).toMatchObject({ policyId: "GG.1503", address: "Glossary: Hospice Care", page: 16 });
+  });
+  it("settles a disagreement between the two readings with a tie-break that sees both sides", () => {
+    expect(tieBreaks).toHaveLength(1); // only the part with disputed requirements, and only those
+    expect(idsIn(tieBreaks[0])).toEqual(["Q25-05", "Q25-06"]);
+    expect(tieBreaks[0]).toContain("Analyst A says: covered. listed");
+    expect(tieBreaks[0]).toContain("Analyst B says: not_covered. the list entry alone does not prove it");
+    expect(tieBreaks[0]).toContain('"5. Medical supplies and appliances;"');
+    const [upheld, overturned] = [run.results[0].items[4], run.results[0].items[5]];
+    expect(upheld).toMatchObject({ status: "covered", tieBreak: { status: "covered" }, reviewer: { agrees: false } });
+    expect(upheld.flags.map((f) => f.code)).toContain("reviewer_disputed");
+    expect(overturned).toMatchObject({ status: "not_covered", tieBreak: { status: "not_covered" } });
+    expect(overturned.evidence).toHaveLength(1); // kept, shown as disputed
+  });
+  it("drops a malformed quote entry instead of losing the whole reply", () => {
+    expect(run.results[0].items[6]).toMatchObject({ status: "covered", reviewer: { agrees: true } });
   });
   it("records which policies were read in full", () => {
     expect(run.documentSets[0].policies.map((p) => p.policyId)).toContain("GG.1503");

@@ -1,16 +1,23 @@
 // Steps 13 (resolution) and 15 — verdicts (ARCHITECTURE.md §8). Plain code.
-import type { Evidence, Flag, ItemResult, ItemStatus, ParentResult, ReviewDraft, Verdict } from "../types";
+import type { Evidence, Flag, ItemResult, ItemStatus, ParentResult, ReviewDraft, TieBreak, Verdict } from "../types";
 import type { CheckedItem } from "./checks";
 
+/** The full reading said "covered" or "conflict" and the second opinion disagrees: a third reading settles it. */
+export function isDisputed(checked: CheckedItem, review: ReviewDraft | null): boolean {
+  return !!review && !review.agrees && (checked.status === "covered" || checked.status === "conflict");
+}
+
 /**
- * Combines the checked first reading with the second opinion. The cautious status wins:
- * a disputed "covered" is not covered; missed evidence found by the reviewer needs a human.
+ * Combines the checked first reading with the second opinion and, where they disagreed, the
+ * tie-break. An answer stands when two of the three readings give it; otherwise a person
+ * decides. Missed evidence found by the reviewer always goes to a person.
  */
 export function resolveSecondOpinion(
   checked: CheckedItem,
   review: ReviewDraft | null,
   verifiedNewEvidence: Evidence[],
-): { status: ItemStatus; evidence: Evidence[]; flags: Flag[]; reviewer: ItemResult["reviewer"] } {
+  tieBreak: TieBreak | null = null,
+): { status: ItemStatus; evidence: Evidence[]; flags: Flag[]; reviewer: ItemResult["reviewer"]; tieBreak?: TieBreak } {
   const flags = [...checked.flags];
   let evidence = [...checked.evidence];
   let status = checked.status;
@@ -23,15 +30,16 @@ export function resolveSecondOpinion(
 
   switch (checked.status) {
     case "covered":
-      if (!review.agrees) {
-        status = "not_covered"; // quotes are kept and shown as disputed evidence
-        flags.push({ code: "reviewer_disputed", detail: review.reason });
-      }
-      break;
     case "conflict":
       if (!review.agrees) {
-        status = "needs_review";
         flags.push({ code: "reviewer_disputed", detail: review.reason });
+        if (tieBreak?.status === checked.status) {
+          // upheld two to one; the dispute stays visible as a flag
+        } else if (tieBreak?.status === "not_covered" && review.proposedStatus === "not_covered") {
+          status = "not_covered"; // quotes are kept and shown as disputed evidence
+        } else {
+          status = "needs_review"; // three different answers, or no tie-break
+        }
       }
       break;
     case "not_covered":
@@ -45,7 +53,8 @@ export function resolveSecondOpinion(
       if (verifiedNewEvidence.length) addNew();
       break;
   }
-  return { status, evidence, flags, reviewer: { agrees: review.agrees, reason: review.reason } };
+  const settled = isDisputed(checked, review) && tieBreak ? { tieBreak } : {};
+  return { status, evidence, flags, reviewer: { agrees: review.agrees, reason: review.reason }, ...settled };
 }
 
 /** Step 15: one verdict per question or obligation, from its items. First match wins. */

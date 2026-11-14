@@ -95,6 +95,7 @@ async function main() {
       }
       if (it.readerReason) console.log(wrap(`reader: ${it.readerReason}`, "      "));
       if (it.reviewer) console.log(wrap(`second opinion: ${it.reviewer.agrees ? "agrees" : "DISAGREES"} — ${it.reviewer.reason}`, "      "));
+      if (it.tieBreak) console.log(wrap(`tie-break: ${it.tieBreak.status} — ${it.tieBreak.reason}`, "      "));
       for (const f of it.flags) {
         // the reader's and the reviewer's reasons are already printed above
         const repeated = f.detail === it.readerReason || f.detail === it.reviewer?.reason;

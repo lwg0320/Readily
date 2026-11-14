@@ -271,7 +271,7 @@ export const TASKS = {
   checklist:        { model: "haiku", effort: "high", maxTokens: 8000,  uiToggle: false },  // Step 7
   readEveryPolicy:  { model: "haiku", effort: "low",  maxTokens: 4000,  uiToggle: false },  // Step 9
   fullReading:      { model: "haiku", effort: "high", maxTokens: 16000, uiToggle: true  },  // Step 11
-  secondOpinion:    { model: "haiku", effort: "high", maxTokens: 16000, uiToggle: true  },  // Step 13
+  secondOpinion:    { model: "haiku", effort: "high", maxTokens: 20000, uiToggle: true  },  // Step 13, including its tie-break
   findObligations:  { model: "haiku", effort: "high", maxTokens: 10000, uiToggle: false },  // Step 22
 } as const;
 ```
@@ -490,15 +490,29 @@ Resolution (plain code). First run `newEvidence` through Step 12's checks 1–2.
 | Reader status (after checks) | Reviewer | Result |
 |---|---|---|
 | covered | agrees | covered |
-| covered | disagrees | **not_covered**, flag `reviewer_disputed` (the cautious status wins). Keep the quotes and show them as "disputed evidence" so Alex can overrule. |
+| covered | disagrees | flag `reviewer_disputed`, then the **tie-break** below |
 | conflict | agrees | conflict |
-| conflict | disagrees | needs_review, flag `reviewer_disputed` |
+| conflict | disagrees | flag `reviewer_disputed`, then the **tie-break** below |
 | not_covered | agrees | not_covered |
 | not_covered | disagrees with verified new evidence | needs_review, attach the evidence, flag `reviewer_found_evidence` |
 | not_covered | disagrees without verified evidence | not_covered |
 | needs_review | any | needs_review (attach verified new evidence) |
 
-### Step 14 — Prove "not found" (`notFound.ts`, plain code)
+**Tie-break (same task settings and model as the second opinion, same cached prefix).** Added after the real-API runs: with the reviewer alone able to overturn a "covered", the same three questions gave different verdicts from run to run, because a strict reviewer sometimes objects to points that are not defects (for example a carve-out for Members under 21). So a disputed `covered` or `conflict` goes to a third reading that sees both sides: the requirement, the reader's answer with its reason and verified quotes, and the reviewer's answer with its reason. Output: `{ items: { itemId, status, reason }[] }`. One call per question part, only for the disputed items. An answer stands when two of the three readings give it:
+
+| Reader | Reviewer | Tie-break | Result |
+|---|---|---|---|
+| covered / conflict | disagrees | same as the reader | the reader's status stands; the `reviewer_disputed` flag stays, so it sorts above clean answers |
+| covered / conflict | says not_covered | not_covered | **not_covered**; the quotes are kept and shown as "disputed evidence" |
+| covered / conflict | disagrees | anything else, or the call failed | needs_review (on failure also flag `analysis_failed`) |
+
+The tie-break is stored on the item as `tieBreak: { status, reason }` and shown under the second opinion.
+
+**One standard for all three readings.** The shared system block defines the answers once: `covered` = policy text that applies to Medi-Cal states every element of the requirement (same meaning or a broader term is fine; a narrower term or a missing element is not; elements may sit in different places, such as a sentence plus a Glossary definition; a carve-out for a particular group does not undo a rule unless it contradicts what the requirement says about that group); `conflict` = a different rule for the same action or subject, including a looser one; `not_covered` = everything else. The task prompts refer to this standard instead of restating it.
+
+Quote lists in replies are parsed leniently: an entry with a missing or misnamed field is dropped, not allowed to make the whole reply unusable.
+
+### Step 14 — Prove "not found" (`runEvidence.ts`, plain code)
 
 For every item that is `not_covered` with no evidence:
 
@@ -642,7 +656,7 @@ Language in the UI is plain: "policies", "checks", "second opinion". No model ja
 **Results (`/run/:runId`)** — Step 16
 - Summary bar: "64 questions · Conflict a · Needs review b · Partial c · Not found d · Covered e · Read all 251 Medi-Cal policies · Standard / Standard · $0.94".
 - Filter chips per verdict. Default sort is riskiest first.
-- Row: question number, first ~120 characters of the question, verdict chip, top citation, small flag chips (labels: `wording_differs` → "wording differs", `number_mismatch` → "numbers differ", `number_not_shown` → "number not shown", `reviewer_disputed` → "second opinion disagreed", `reviewer_found_evidence` → "second opinion found evidence", `policy_predates_apl` / `cites_superseded_apl` → "policy may be outdated", `quote_corrected` → "quote corrected", `wrong_program_removed` → "non-Medi-Cal text removed", `list_count_mismatch` → "list may be incomplete").
+- Row: question number, first ~120 characters of the question, verdict chip, top citation, small flag chips (labels: `wording_differs` → "wording differs", `number_mismatch` → "numbers differ", `number_not_shown` → "number not shown", `reviewer_disputed` → "second opinion disagreed" (with "upheld by tie-break" when the item is still covered or conflict), `reviewer_found_evidence` → "second opinion found evidence", `policy_predates_apl` / `cites_superseded_apl` → "policy may be outdated", `quote_corrected` → "quote corrected", `wrong_program_removed` → "non-Medi-Cal text removed", `list_count_mismatch` → "list may be incomplete").
 - Progress: "n of 64 approved". Buttons: **Fill DHCS form**, **Download CSV**.
 - If another run exists for the same questionnaire: **Show differences** lists questions whose verdict differs between the two runs, side by side.
 - Re-run button reflecting the current toggles, with its estimate.

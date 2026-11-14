@@ -4,16 +4,16 @@ import { PIPELINE } from "../config/pipeline";
 import type { ModelKey } from "../config/models";
 import type { LLM, UsageTracker } from "../llm/client";
 import { LLMError } from "../llm/client";
-import { documentsBlock, READING_SYSTEM, readerSchema, readerTask, reviewerSchema, reviewerTask, type ProposedAnswer } from "../llm/prompts/reading";
+import { documentsBlock, READING_SYSTEM, readerSchema, readerTask, reviewerSchema, reviewerTask, tieBreakSchema, tieBreakTask, type ProposedAnswer } from "../llm/prompts/reading";
 import { estimateTokens } from "../lib/text";
-import type { Evidence, Flag, Item, ItemResult, ItemStatus, ParentResult, ReaderDraft, Regulator, ReviewDraft, SearchTrail } from "../types";
+import type { Evidence, Flag, Item, ItemResult, ItemStatus, ParentResult, ReaderDraft, Regulator, ReviewDraft, SearchTrail, TieBreak } from "../types";
 import { buildChunks, collectCandidates, excerptPolicy, foundByLog, usableTerm, type ChunkPolicy, type FoundByEntry } from "./candidates";
 import { checkItem, verifyEvidence, type CheckContext } from "./checks";
 import { bundleItems } from "./grouping";
 import type { Library } from "./library";
 import type { OnProgress } from "./progress";
 import { readEveryPolicy, type Screening } from "./readEveryPolicy";
-import { buildParentResult, resolveSecondOpinion } from "./verdicts";
+import { buildParentResult, isDisputed, resolveSecondOpinion } from "./verdicts";
 
 export type Parent = {
   id: string;
@@ -56,7 +56,7 @@ export type EvidenceArgs = {
  * What one item looks like after the full reading, checks and second opinion on one set of
  * documents. `failed`: the reading of that set could not be completed.
  */
-export type Outcome = { status: ItemStatus; evidence: Evidence[]; flags: Flag[]; readerReason: string; reviewer: ItemResult["reviewer"]; failed?: boolean };
+export type Outcome = { status: ItemStatus; evidence: Evidence[]; flags: Flag[]; readerReason: string; reviewer: ItemResult["reviewer"]; tieBreak?: TieBreak; failed?: boolean };
 
 /**
  * Which outcome wins when an item was checked against several sets of documents.
@@ -113,6 +113,7 @@ export function mergeOutcomes(outcomes: Outcome[]): Outcome {
     flags: dedupeFlags(winners.flatMap((o) => o.flags)),
     readerReason: winners.map((o) => o.readerReason).filter(Boolean)[0] ?? "",
     reviewer: winners.map((o) => o.reviewer).find(Boolean) ?? null,
+    tieBreak: winners.map((o) => o.tieBreak).find(Boolean),
   };
 }
 
@@ -219,22 +220,54 @@ export async function runEvidence(args: EvidenceArgs): Promise<EvidenceRun> {
         llm.call({ task: "secondOpinion", model: models.secondOpinion, system, user: [prefix, { text: reviewerTask(u.parent, u.items.map((i) => proposed.get(i.id)!)) }], schema: reviewerSchema, tracker, signal }),
       sameModel,
     );
+    const reviewOf = new Map<string, ReviewDraft>();
+    const reviewError = new Map<string, LLMError>();
     for (const { unit, result } of reviews) {
-      const byItem = result instanceof LLMError ? new Map<string, ReviewDraft>() : new Map(result.data.items.map((d) => [d.itemId, d as ReviewDraft]));
-      for (const item of unit.items) {
-        const answer = proposed.get(item.id)!;
-        const review = byItem.get(item.id) ?? null;
-        const fresh = review ? verifyEvidence(item, review.newEvidence, localCtx) : { evidence: [], flags: [] };
-        const resolved = resolveSecondOpinion({ status: answer.status, evidence: answer.evidence, flags: answer.flags }, review, fresh.evidence);
-        let { status } = resolved;
-        const flags = [...resolved.flags, ...(resolved.evidence.length > answer.evidence.length ? fresh.flags : [])];
-        if (!review && status === "covered") {
-          // "Covered" requires a second opinion that agrees. Without one, a person decides.
-          status = "needs_review";
-          flags.push({ code: "analysis_failed", detail: `The second opinion could not be completed. ${result instanceof LLMError ? why(result) : "The reply left this requirement out."} Run again to retry.` });
-        }
-        out.set(item.id, { status, evidence: resolved.evidence, flags: dedupeFlags(flags), readerReason: reasons.get(item.id) ?? "", reviewer: resolved.reviewer });
+      if (result instanceof LLMError) unit.items.forEach((i) => reviewError.set(i.id, result));
+      else for (const d of result.data.items) reviewOf.set(d.itemId, d as ReviewDraft);
+    }
+
+    // Tie-break: where the two readings disagree, a third one sees both and settles it.
+    const disputeUnits: Unit[] = reviewUnits
+      .map((u) => ({ parent: u.parent, items: u.items.filter((i) => isDisputed(proposed.get(i.id)!, reviewOf.get(i.id) ?? null)) }))
+      .filter((u) => u.items.length);
+    const tieOf = new Map<string, TieBreak>();
+    const tieError = new Map<string, LLMError>();
+    const ties = await callUnits(
+      disputeUnits,
+      (u) => () => {
+        const disputes = u.items.map((i) => {
+          const review = reviewOf.get(i.id)!;
+          return { ...proposed.get(i.id)!, readerReason: reasons.get(i.id) ?? "", reviewerStatus: review.proposedStatus, reviewerReason: review.reason };
+        });
+        return llm.call({ task: "secondOpinion", model: models.secondOpinion, system, user: [prefix, { text: tieBreakTask(u.parent, disputes) }], schema: tieBreakSchema, tracker, signal });
+      },
+      true,
+    );
+    for (const { unit, result } of ties) {
+      if (result instanceof LLMError) unit.items.forEach((i) => tieError.set(i.id, result));
+      else for (const d of result.data.items) tieOf.set(d.itemId, { status: d.status, reason: d.reason });
+    }
+
+    for (const [id, answer] of proposed) {
+      const { item } = answer;
+      const review = reviewOf.get(id) ?? null;
+      const tie = tieOf.get(id) ?? null;
+      const fresh = review ? verifyEvidence(item, review.newEvidence, localCtx) : { evidence: [], flags: [] };
+      const resolved = resolveSecondOpinion({ status: answer.status, evidence: answer.evidence, flags: answer.flags }, review, fresh.evidence, tie);
+      let { status } = resolved;
+      const flags = [...resolved.flags, ...(resolved.evidence.length > answer.evidence.length ? fresh.flags : [])];
+      if (!review && status === "covered") {
+        // "Covered" requires a second opinion that agrees. Without one, a person decides.
+        status = "needs_review";
+        const e = reviewError.get(id);
+        flags.push({ code: "analysis_failed", detail: `The second opinion could not be completed. ${e ? why(e) : "The reply left this requirement out."} Run again to retry.` });
       }
+      if (isDisputed(answer, review) && !tie) {
+        const e = tieError.get(id);
+        flags.push({ code: "analysis_failed", detail: `The two readings disagree and the tie-break could not be completed. ${e ? why(e) : "The reply left this requirement out."} Run again to retry.` });
+      }
+      out.set(id, { status, evidence: resolved.evidence, flags: dedupeFlags(flags), readerReason: reasons.get(id) ?? "", reviewer: resolved.reviewer, tieBreak: resolved.tieBreak });
     }
     return out;
   }

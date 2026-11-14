@@ -20,6 +20,6 @@ export const TASKS: Record<TaskKey, { model: ModelKey; effort: Effort; maxTokens
   checklist: { model: "haiku", effort: "high", maxTokens: 8000, uiToggle: false }, // Step 7
   readEveryPolicy: { model: "haiku", effort: "low", maxTokens: 4000, uiToggle: false }, // Step 9
   fullReading: { model: "haiku", effort: "high", maxTokens: 16000, uiToggle: true }, // Step 11
-  secondOpinion: { model: "haiku", effort: "high", maxTokens: 16000, uiToggle: true }, // Step 13
+  secondOpinion: { model: "haiku", effort: "high", maxTokens: 20000, uiToggle: true }, // Step 13, including its tie-break
   findObligations: { model: "haiku", effort: "high", maxTokens: 10000, uiToggle: false }, // Step 22
 };

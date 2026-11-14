@@ -162,6 +162,8 @@ class Semaphore {
 }
 
 const BACKOFF_MS = [2000, 4000, 8000, 16000, 32000];
+/** The most room a cut-off reply is given when it is asked for again. */
+const MAX_REPLY_TOKENS = 32_000;
 export const JSON_INSTRUCTION = "Return only a JSON object inside <json></json> tags.";
 
 type ApiMessage = { role: "user" | "assistant"; content: { type: "text"; text: string; cache_control?: { type: "ephemeral" } }[] };
@@ -312,7 +314,7 @@ export function createLLM(deps: LLMDeps) {
           // ran out of room (thinking counts toward the limit): try once more with twice the room
           lastProblem = `the reply was cut off at the ${maxTokens}-token limit`;
           req.tracker?.recordCutOff(req.task);
-          maxTokens *= 2;
+          maxTokens = Math.min(maxTokens * 2, MAX_REPLY_TOKENS);
         } else {
           messages.push({ role: "assistant", content: [{ type: "text", text: text || "(empty reply)" }] });
           messages.push({
