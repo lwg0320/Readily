@@ -8,12 +8,12 @@ import { documentsBlock, READING_SYSTEM, readerSchema, readerTask, reviewerSchem
 import { estimateTokens } from "../lib/text";
 import type { Evidence, Flag, Item, ItemResult, ItemStatus, ParentResult, ReaderDraft, Regulator, ReviewDraft, SearchTrail, TieBreak } from "../types";
 import { buildChunks, collectCandidates, excerptPolicy, foundByLog, usableTerm, type ChunkPolicy, type FoundByEntry } from "./candidates";
-import { checkItem, verifyEvidence, type CheckContext } from "./checks";
+import { checkFreshness, checkItem, checkNumbers, verifyEvidence, type CheckContext } from "./checks";
 import { bundleItems } from "./grouping";
 import type { Library } from "./library";
 import type { OnProgress } from "./progress";
 import { readEveryPolicy, type Screening } from "./readEveryPolicy";
-import { buildParentResult, isDisputed, resolveSecondOpinion } from "./verdicts";
+import { buildParentResult, resolveSecondOpinion } from "./verdicts";
 
 export type Parent = {
   id: string;
@@ -104,6 +104,23 @@ export function mergeOutcomes(outcomes: Outcome[]): Outcome {
   if (!outcomes.length) {
     return { status: "not_covered", evidence: [], flags: [], readerReason: "No policy was identified as possibly relevant.", reviewer: null };
   }
+  // One set of policies states the requirement and another appears to set a different rule.
+  // Each reading only saw its own set, so neither answer is safe alone: a person sees both.
+  const covering = outcomes.filter((o) => !o.failed && o.status === "covered");
+  const conflicting = outcomes.filter((o) => !o.failed && o.status === "conflict");
+  if (covering.length && conflicting.length) {
+    const ids = (os: Outcome[]) => [...new Set(os.flatMap((o) => o.evidence.map((e) => e.policyId)))].join(", ");
+    const both = [...covering, ...conflicting];
+    return {
+      status: "needs_review",
+      evidence: dedupeEvidence(both.flatMap((o) => o.evidence)),
+      flags: dedupeFlags([{ code: "policies_disagree", detail: `${ids(covering)} states the requirement, but ${ids(conflicting)} appears to set a different rule.` }, ...both.flatMap((o) => o.flags)]),
+      readerReason: both.map((o) => o.readerReason).filter(Boolean).join(" · "),
+      reviewer: covering.map((o) => o.reviewer).find(Boolean) ?? null,
+      tieBreak: conflicting.map((o) => o.tieBreak).find(Boolean),
+    };
+  }
+
   const top = Math.max(...outcomes.map(rank));
   // among equals, the one that has something to show speaks first
   const winners = outcomes.filter((o) => rank(o) === top).sort((a, b) => Number(b.evidence.length > 0) - Number(a.evidence.length > 0));
@@ -227,18 +244,33 @@ export async function runEvidence(args: EvidenceArgs): Promise<EvidenceRun> {
       else for (const d of result.data.items) reviewOf.set(d.itemId, d as ReviewDraft);
     }
 
-    // Tie-break: where the two readings disagree, a third one sees both and settles it.
-    const disputeUnits: Unit[] = reviewUnits
-      .map((u) => ({ parent: u.parent, items: u.items.filter((i) => isDisputed(proposed.get(i.id)!, reviewOf.get(i.id) ?? null)) }))
-      .filter((u) => u.items.length);
+    // The checked answer, the second opinion and its verified quotes, per requirement.
+    const cases = new Map<string, { answer: ProposedAnswer; review: ReviewDraft | null; fresh: { evidence: Evidence[]; flags: Flag[] } }>();
+    for (const [id, answer] of proposed) {
+      const review = reviewOf.get(id) ?? null;
+      cases.set(id, { answer, review, fresh: review ? verifyEvidence(answer.item, review.newEvidence, localCtx) : { evidence: [], flags: [] } });
+    }
+    const needsThird = (id: string) => {
+      const c = cases.get(id)!;
+      return resolveSecondOpinion(c.answer, c.review, c.fresh.evidence).thirdReading;
+    };
+
+    // Third reading: settles a disagreement between the two, and confirms every conflict.
+    const thirdUnits: Unit[] = reviewUnits.map((u) => ({ parent: u.parent, items: u.items.filter((i) => needsThird(i.id)) })).filter((u) => u.items.length);
     const tieOf = new Map<string, TieBreak>();
     const tieError = new Map<string, LLMError>();
     const ties = await callUnits(
-      disputeUnits,
+      thirdUnits,
       (u) => () => {
-        const disputes = u.items.map((i) => {
-          const review = reviewOf.get(i.id)!;
-          return { ...proposed.get(i.id)!, readerReason: reasons.get(i.id) ?? "", reviewerStatus: review.proposedStatus, reviewerReason: review.reason };
+        const disputes = u.items.map((item) => {
+          const { answer, review, fresh } = cases.get(item.id)!;
+          // a "covered" that failed an automatic check never gets here, so the status is one of the three answers
+          const readerStatus = answer.status as "covered" | "not_covered" | "conflict";
+          return {
+            item,
+            reader: { status: readerStatus, reason: reasons.get(item.id) ?? "", evidence: answer.evidence },
+            reviewer: { status: review!.proposedStatus, reason: review!.reason, evidence: fresh.evidence },
+          };
         });
         return llm.call({ task: "secondOpinion", model: models.secondOpinion, system, user: [prefix, { text: tieBreakTask(u.parent, disputes) }], schema: tieBreakSchema, tracker, signal });
       },
@@ -249,23 +281,29 @@ export async function runEvidence(args: EvidenceArgs): Promise<EvidenceRun> {
       else for (const d of result.data.items) tieOf.set(d.itemId, { status: d.status, reason: d.reason });
     }
 
-    for (const [id, answer] of proposed) {
+    for (const [id, { answer, review, fresh }] of cases) {
       const { item } = answer;
-      const review = reviewOf.get(id) ?? null;
       const tie = tieOf.get(id) ?? null;
-      const fresh = review ? verifyEvidence(item, review.newEvidence, localCtx) : { evidence: [], flags: [] };
-      const resolved = resolveSecondOpinion({ status: answer.status, evidence: answer.evidence, flags: answer.flags }, review, fresh.evidence, tie);
+      const resolved = resolveSecondOpinion(answer, review, fresh.evidence, tie);
       let { status } = resolved;
-      const flags = [...resolved.flags, ...(resolved.evidence.length > answer.evidence.length ? fresh.flags : [])];
+      const flags = [...resolved.flags];
+      const usesNewQuotes = resolved.evidence.some((e) => !answer.evidence.includes(e));
+      if (usesNewQuotes) flags.push(...fresh.flags);
+      if ((status === "covered" || status === "conflict") && (usesNewQuotes || status !== answer.status)) {
+        // the answer or its quotes changed after Step 12: the number and freshness checks run again
+        const numberFlags = checkNumbers(item, resolved.evidence);
+        flags.push(...numberFlags, ...checkFreshness(resolved.evidence, localCtx));
+        if (status === "covered" && numberFlags.length) status = "needs_review";
+      }
       if (!review && status === "covered") {
         // "Covered" requires a second opinion that agrees. Without one, a person decides.
         status = "needs_review";
         const e = reviewError.get(id);
         flags.push({ code: "analysis_failed", detail: `The second opinion could not be completed. ${e ? why(e) : "The reply left this requirement out."} Run again to retry.` });
       }
-      if (isDisputed(answer, review) && !tie) {
+      if (resolved.thirdReading && !tie) {
         const e = tieError.get(id);
-        flags.push({ code: "analysis_failed", detail: `The two readings disagree and the tie-break could not be completed. ${e ? why(e) : "The reply left this requirement out."} Run again to retry.` });
+        flags.push({ code: "analysis_failed", detail: `The tie-break could not be completed. ${e ? why(e) : "The reply left this requirement out."} Run again to retry.` });
       }
       out.set(id, { status, evidence: resolved.evidence, flags: dedupeFlags(flags), readerReason: reasons.get(id) ?? "", reviewer: resolved.reviewer, tieBreak: resolved.tieBreak });
     }

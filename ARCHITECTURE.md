@@ -452,7 +452,7 @@ Task instructions:
 
 Output: `{ items: { itemId, status: "covered" | "not_covered" | "conflict", wording: "same" | "equivalent", evidence: { policyId, quote }[], reason: string }[] }` (reason ≤ 40 words). `wording` is "equivalent" when the policy uses different terms from the requirement (for example "hospice physician" for "hospice medical director"); the reason must then name both terms. A `covered` item with `wording: "equivalent"` gets flag `wording_differs`. It stays `covered`, but it sorts above other covered answers so Alex confirms the judgment call herself.
 
-Merging across chunks happens after Step 13 (`mergeOutcomes`). For each item the winner is chosen in this order: a confirmed conflict > covered > needs_review > a chunk whose reading failed > not_covered. Evidence, flags, reason and second opinion are taken only from the chunk(s) that won. The reasoning: confirmed evidence in one chunk is not weakened by an open question raised against unrelated policies in another chunk (for example a "conflict" the second opinion threw out), but nothing may be called "not found" while a read is missing, so a failed chunk outranks "nothing found" and shows as `needs_review` with flag `analysis_failed` and the reason for the failure.
+Merging across chunks happens after Step 13 (`mergeOutcomes`). If one chunk says `covered` and another says `conflict`, the item becomes `needs_review` with the quotes from both and flag `policies_disagree`: each reading only saw its own chunk, so neither answer is safe alone. Otherwise, for each item the winner is chosen in this order: a confirmed conflict > covered > needs_review > a chunk whose reading failed > not_covered. Evidence, flags, reason and second opinion are taken only from the chunk(s) that won. The reasoning: confirmed evidence in one chunk is not weakened by an open question raised against unrelated policies in another chunk (for example a "conflict" the second opinion threw out), but nothing may be called "not found" while a read is missing, so a failed chunk outranks "nothing found" and shows as `needs_review` with flag `analysis_failed` and the reason for the failure.
 
 ### Step 12 — Automatic checks (`checks.ts`, plain code)
 
@@ -467,6 +467,7 @@ Then per item:
 4. **Numbers.** For each `quantity` in the item, look through the item's quotes (`extractQuantities`). 
    - A quote has the same value and `unitBase` → fine.
    - No quote has that value, but a quote has the same `unitBase` with a different value → flag `number_mismatch` with both values. If the status was `covered`, it becomes `needs_review`.
+   - No quote has any quantity of that `unitBase`, but a quote shows the bare number ("under age of twenty-one (21)", "day one (1) to sixty (60)") → fine.
    - No quote has any quantity of that `unitBase` → flag `number_not_shown`. If the status was `covered`, it becomes `needs_review`.
 5. **Outdated policy.** For each cited policy: flag `policy_predates_apl` if `revisedDate` < APL date; flag `cites_superseded_apl` if `referencedApls` intersects the APL's `supersedes`. These do not change status. (For Guide checks, use the Guide's date, 2026-01-01, and skip the superseded check.)
 
@@ -487,28 +488,34 @@ Output: `{ items: { itemId, agrees: boolean, proposedStatus: "covered" | "not_co
 
 Resolution (plain code). First run `newEvidence` through Step 12's checks 1–2. If the second-opinion call fails or skips an item, a `covered` becomes `needs_review` with flag `analysis_failed`, because Covered requires a second opinion that agrees. If both toggles use the same model, Step 13 skips the cache warm-up (Step 11 already wrote the cache).
 
-| Reader status (after checks) | Reviewer | Result |
+The rules, with A = the reader's status after the automatic checks, B = the second opinion, C = the third reading ("tie-break"):
+
+| A | B | Result |
 |---|---|---|
-| covered | agrees | covered |
-| covered | disagrees | flag `reviewer_disputed`, then the **tie-break** below |
-| conflict | agrees | conflict |
-| conflict | disagrees | flag `reviewer_disputed`, then the **tie-break** below |
-| not_covered | agrees | not_covered |
-| not_covered | disagrees with verified new evidence | needs_review, attach the evidence, flag `reviewer_found_evidence` |
-| not_covered | disagrees without verified evidence | not_covered |
-| needs_review | any | needs_review (attach verified new evidence) |
+| covered | covered | covered |
+| not_covered | not_covered, or anything without a verified quote | not_covered |
+| covered or conflict | a different answer | flag `reviewer_disputed`, then C decides |
+| conflict | conflict | C must confirm it |
+| not_covered | covered or conflict, with verified new evidence | flag `reviewer_found_evidence`, then C decides |
+| needs_review (a "covered" that failed a number check) | not_covered | not_covered, quotes kept as disputed evidence |
+| needs_review | anything else | needs_review (attach verified new evidence) |
 
-**Tie-break (same task settings and model as the second opinion, same cached prefix).** Added after the real-API runs: with the reviewer alone able to overturn a "covered", the same three questions gave different verdicts from run to run, because a strict reviewer sometimes objects to points that are not defects (for example a carve-out for Members under 21). So a disputed `covered` or `conflict` goes to a third reading that sees both sides: the requirement, the reader's answer with its reason and verified quotes, and the reviewer's answer with its reason. Output: `{ items: { itemId, status, reason }[] }`. One call per question part, only for the disputed items. An answer stands when two of the three readings give it:
+**Third reading (same task settings and model as the second opinion, same cached prefix).** Added after the real-API runs. With the reviewer alone able to overturn a "covered", the same questions gave different verdicts from run to run; and on the full run two of eight reported conflicts were false, both raised from boilerplate glossary text in a secondary policy. The third reading sees both sides: the requirement, each analyst's answer, reason and verified quotes. One call per question part, only for the items that need it. Output: `{ items: { itemId, status, reason }[] }`.
 
-| Reader | Reviewer | Tie-break | Result |
-|---|---|---|---|
-| covered / conflict | disagrees | same as the reader | the reader's status stands; the `reviewer_disputed` flag stays, so it sorts above clean answers |
-| covered / conflict | says not_covered | not_covered | **not_covered**; the quotes are kept and shown as "disputed evidence" |
-| covered / conflict | disagrees | anything else, or the call failed | needs_review (on failure also flag `analysis_failed`) |
+| Case | C says | Result |
+|---|---|---|
+| A and B disagree | the same as A | A's answer stands; the `reviewer_disputed` flag stays, so it sorts above clean answers |
+| A and B disagree | the same as B | B's answer: `not_covered` keeps A's quotes as "disputed evidence"; `covered` uses A's quotes plus B's; `conflict` needs B's own verified quote of the conflicting text, else needs_review |
+| A and B disagree | a third answer | needs_review |
+| both say conflict | conflict | conflict |
+| both say conflict | anything else | needs_review, flag `conflict_unconfirmed` with C's reason |
+| B found evidence | the same as B | B's answer with B's quotes |
+| B found evidence | not_covered | not_covered, B's quotes kept as disputed evidence |
+| any | the call failed | needs_review, flag `analysis_failed` |
 
-The tie-break is stored on the item as `tieBreak: { status, reason }` and shown under the second opinion.
+Whenever the final answer or its quotes differ from what Step 12 checked, the number and freshness checks run again on the final quotes. The third reading is stored on the item as `tieBreak: { status, reason }` and shown under the second opinion.
 
-**One standard for all three readings.** The shared system block defines the answers once: `covered` = policy text that applies to Medi-Cal states every element of the requirement (same meaning or a broader term is fine; a narrower term or a missing element is not; elements may sit in different places, such as a sentence plus a Glossary definition; a carve-out for a particular group does not undo a rule unless it contradicts what the requirement says about that group); `conflict` = a different rule for the same action or subject, including a looser one; `not_covered` = everything else. The task prompts refer to this standard instead of restating it.
+**One standard for all three readings.** The shared system block defines the answers once: `covered` = policy text that applies to Medi-Cal states every element of the requirement (same meaning or a broader term is fine; a narrower term or a missing element is not; elements may sit in different places, such as a sentence plus a Glossary definition; a carve-out for a particular group does not undo a rule unless it contradicts what the requirement says about that group); `conflict` = a different rule for the same action or subject, including a looser one (general text such as a definition or an exclusion list conflicts only when it plainly deals with the requirement's own service or action); `not_covered` = everything else. The task prompts refer to this standard instead of restating it.
 
 Quote lists in replies are parsed leniently: an entry with a missing or misnamed field is dropped, not allowed to make the whole reply unusable.
 
@@ -656,7 +663,7 @@ Language in the UI is plain: "policies", "checks", "second opinion". No model ja
 **Results (`/run/:runId`)** — Step 16
 - Summary bar: "64 questions · Conflict a · Needs review b · Partial c · Not found d · Covered e · Read all 251 Medi-Cal policies · Standard / Standard · $0.94".
 - Filter chips per verdict. Default sort is riskiest first.
-- Row: question number, first ~120 characters of the question, verdict chip, top citation, small flag chips (labels: `wording_differs` → "wording differs", `number_mismatch` → "numbers differ", `number_not_shown` → "number not shown", `reviewer_disputed` → "second opinion disagreed" (with "upheld by tie-break" when the item is still covered or conflict), `reviewer_found_evidence` → "second opinion found evidence", `policy_predates_apl` / `cites_superseded_apl` → "policy may be outdated", `quote_corrected` → "quote corrected", `wrong_program_removed` → "non-Medi-Cal text removed", `list_count_mismatch` → "list may be incomplete").
+- Row: question number, first ~120 characters of the question, verdict chip, top citation, small flag chips (labels: `wording_differs` → "wording differs", `number_mismatch` → "numbers differ", `number_not_shown` → "number not shown", `reviewer_disputed` → "second opinion disagreed" (with "upheld by tie-break" when the item is still covered or conflict), `reviewer_found_evidence` → "second opinion found evidence", `conflict_unconfirmed` → "conflict not confirmed", `policies_disagree` → "policies may disagree", `policy_predates_apl` / `cites_superseded_apl` → "policy may be outdated", `quote_corrected` → "quote corrected", `wrong_program_removed` → "non-Medi-Cal text removed", `list_count_mismatch` → "list may be incomplete").
 - Progress: "n of 64 approved". Buttons: **Fill DHCS form**, **Download CSV**.
 - If another run exists for the same questionnaire: **Show differences** lists questions whose verdict differs between the two runs, side by side.
 - Re-run button reflecting the current toggles, with its estimate.

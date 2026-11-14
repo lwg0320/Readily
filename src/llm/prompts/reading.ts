@@ -20,7 +20,7 @@ The standard for every answer:
   - Different words are fine when they mean the same thing. So is a broader term that clearly includes the requirement's term ("counseling" includes grief counseling). A narrower term is not enough, and neither is text that leaves an element of the requirement out.
   - The elements may be stated in different places, for example a policy sentence together with a Glossary definition.
   - A policy that states the requirement as its rule still states it when it also has a carve-out for a particular group or situation (for example different rules for Members under 21), eligibility conditions, or steps for carrying the rule out. That is a defect only when it contradicts what the requirement itself says about that same group or situation.
-- "conflict": a policy sets a different rule for the same action or subject as the requirement: a different deadline, amount or responsible party, or permission for something the requirement rules out. A looser rule is a conflict even when both could be satisfied at once: a policy that allows 60 days where the requirement allows 14 conflicts with it. Text about a different subject is never a conflict.
+- "conflict": a policy sets a different rule for the same action or subject as the requirement: a different deadline, amount or responsible party, or permission for something the requirement rules out. A looser rule is a conflict even when both could be satisfied at once: a policy that allows 60 days where the requirement allows 14 conflicts with it. Text about a different subject is never a conflict. General text such as a definition or a list of exclusions conflicts only when it plainly deals with the requirement's own service or action; a similar-sounding term, or a law or program cited only by name or number, is not enough.
 - "not_covered": everything else, including a policy that states only part of the requirement, and silence.`;
 
 /** The shared, cached block: the documents, then the regulator text. */
@@ -110,7 +110,7 @@ const STATUS_WORDS: Record<ItemStatus, string> = {
   covered: "covered",
   not_covered: "not_covered (no acceptable evidence was found)",
   conflict: "conflict (the policy states something incompatible)",
-  needs_review: "needs_review (evidence exists but an automatic check raised a problem)",
+  needs_review: "covered, but an automatic check could not find a required number in the quoted text",
 };
 
 const proposalBlock = (p: ProposedAnswer) => {
@@ -142,7 +142,7 @@ ${blocks}
 For each requirement:
 - If the proposal is "covered": does policy text really state every element of the requirement? Is the policy's term narrower? Does another passage contradict it? Does the text apply to Medi-Cal members? Does any number or deadline match?
 - If the proposal is "conflict": is the quoted text about the same action or subject as the requirement, and does it set a different rule?
-- If the proposal is "not_covered" or "needs_review": search the documents for evidence that was missed. If you find some, quote it in "newEvidence".
+- If the proposal is "not_covered", or an automatic check failed: search the documents for evidence that was missed. If you find some, quote it in "newEvidence". If you answer "conflict", quote the conflicting text there too.
 - "proposedStatus" is the answer you would give under the standard in your instructions: "covered", "not_covered" or "conflict". "agrees" is true if that is the proposed answer.
 - Disagree only for a real defect under the standard, and name it in "reason" (at most 40 words). Points the standard accepts, such as a broader term, a carve-out for a particular group, or elements stated in two places, are not defects.
 - "newEvidence" entries have the form {"policyId":"GG.1503","quote":"…"}: exact contiguous policy text, at most 80 words each, at most 3, with any double quote inside written as \\". Use [] when you have none.
@@ -161,15 +161,22 @@ export const tieBreakSchema = z.object({
 });
 export type TieBreakOutput = z.infer<typeof tieBreakSchema>;
 
-export type Dispute = ProposedAnswer & { readerReason: string; reviewerStatus: "covered" | "not_covered" | "conflict"; reviewerReason: string };
+type Answer = "covered" | "not_covered" | "conflict";
+export type Dispute = {
+  item: Item;
+  reader: { status: Answer; reason: string; evidence: Evidence[] };
+  reviewer: { status: Answer; reason: string; evidence: Evidence[] };
+};
 
-/** Asked only about requirements on which the full reading and the second opinion disagree. */
+const quoteLines = (evidence: Evidence[]) => evidence.map((e) => `\n     - ${e.policyId} §${e.address}, p.${e.page}: "${e.quote}"`).join("");
+
+/**
+ * The third reading. Asked only about requirements on which the full reading and the second
+ * opinion disagree, and about every conflict before it is reported.
+ */
 export function tieBreakTask(parent: { label: string; text: string }, disputes: Dispute[]): string {
   const blocks = disputes
-    .map((d) => {
-      const { quotes } = proposalBlock(d);
-      return `${d.item.id}: ${d.item.requirement}\n   Analyst A says: ${d.status}. ${d.readerReason}\n${quotes}\n   Analyst B says: ${d.reviewerStatus}. ${d.reviewerReason}`;
-    })
+    .map((d) => `${d.item.id}: ${d.item.requirement}\n   Analyst A says: ${d.reader.status}. ${d.reader.reason}${quoteLines(d.reader.evidence)}\n   Analyst B says: ${d.reviewer.status}. ${d.reviewer.reason}${quoteLines(d.reviewer.evidence)}`)
     .join("\n\n");
 
   return `TASK: TIE-BREAK
@@ -177,11 +184,15 @@ export function tieBreakTask(parent: { label: string; text: string }, disputes: 
 ${parent.label}:
 ${parent.text}
 
-Two analysts read the policy documents above and disagree about the requirements below. Settle each one from the documents yourself.
+Two analysts read the policy documents above and answered the requirements below. Either they disagree, or both found a conflict, which must be confirmed before it is reported. Settle each one from the documents yourself.
 
 ${blocks}
 
-For each requirement, give the answer that is correct under the standard in your instructions: "covered", "not_covered" or "conflict". Test Analyst B's objection against that standard: is it a real defect, or a point the standard accepts? Test Analyst A's quotes the same way: do they state every element of the requirement? "reason" is at most 40 words and says what decided it.
+For each requirement, give the answer that is correct under the standard in your instructions: "covered", "not_covered" or "conflict".
+- Test every objection against the standard: is it a real defect, or a point the standard accepts?
+- Test the quotes the same way: do they state every element of the requirement?
+- Before you confirm a "conflict", work out what the quoted policy text is actually about. It must deal with the requirement's own service or action and set a different rule for it.
+"reason" is at most 40 words and says what decided it.
 
 Answer for every requirement.
 

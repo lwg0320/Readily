@@ -130,4 +130,15 @@ describe("checklist numbers (Step 7)", () => {
     ]);
     expect(flags.map((f) => f.detail)).toEqual(["Requirement: 51 percent · not shown in the quoted text", "Requirement: 1 month · not shown in the quoted text"]);
   });
+  it("accepts a number that the quote shows without its unit", () => {
+    const quote = (text: string) => [{ policyId: "GG.1503", quote: text, page: 1, address: "II.A", kind: "policy", scope: "all", status: "exact" } as any];
+    const years = item({ id: "Q1-01", quantities: [{ value: 21, unit: "year", unitBase: "year" }] });
+    expect(checkNumbers(years, quote("a Member under the age of twenty-one (21) may elect concurrent care"))).toHaveLength(0);
+    const days = item({ id: "Q1-02", quantities: [{ value: 60, unit: "day", unitBase: "day" }] });
+    expect(checkNumbers(days, quote("a higher rate for day one (1) to sixty (60)"))).toHaveLength(0);
+    expect(checkNumbers(days, quote("a higher rate for the first 160 visits")).map((f) => f.code)).toEqual(["number_not_shown"]);
+    // a different number with the same unit is still a mismatch
+    const five = item({ id: "Q1-03", quantities: [{ value: 5, unit: "calendar day", unitBase: "day" }] });
+    expect(checkNumbers(five, quote("no later than thirty (30) calendar days, see section 5")).map((f) => f.code)).toEqual(["number_mismatch"]);
+  });
 });

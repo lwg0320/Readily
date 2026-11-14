@@ -2,59 +2,87 @@
 import type { Evidence, Flag, ItemResult, ItemStatus, ParentResult, ReviewDraft, TieBreak, Verdict } from "../types";
 import type { CheckedItem } from "./checks";
 
-/** The full reading said "covered" or "conflict" and the second opinion disagrees: a third reading settles it. */
-export function isDisputed(checked: CheckedItem, review: ReviewDraft | null): boolean {
-  return !!review && !review.agrees && (checked.status === "covered" || checked.status === "conflict");
-}
+export type Resolution = {
+  status: ItemStatus;
+  evidence: Evidence[];
+  flags: Flag[];
+  reviewer: ItemResult["reviewer"];
+  /** True when a third reading is needed to settle or confirm the answer. */
+  thirdReading: boolean;
+  tieBreak?: TieBreak;
+};
 
 /**
- * Combines the checked first reading with the second opinion and, where they disagreed, the
- * tie-break. An answer stands when two of the three readings give it; otherwise a person
- * decides. Missed evidence found by the reviewer always goes to a person.
+ * Combines the checked full reading (A), the second opinion (B) and, when one was needed, the
+ * third reading (C). Call it once without C to learn whether a third reading is needed; without
+ * one, those cases go to a person.
+ *
+ * - A and B agree on "covered" or "not covered": that answer stands.
+ * - A and B disagree: the answer that C shares with one of them stands. No two agree: a person decides.
+ * - A "conflict" is only reported when C confirms it, even if A and B agree.
+ * - Evidence only B found counts once C accepts it.
  */
 export function resolveSecondOpinion(
   checked: CheckedItem,
   review: ReviewDraft | null,
   verifiedNewEvidence: Evidence[],
   tieBreak: TieBreak | null = null,
-): { status: ItemStatus; evidence: Evidence[]; flags: Flag[]; reviewer: ItemResult["reviewer"]; tieBreak?: TieBreak } {
+): Resolution {
   const flags = [...checked.flags];
-  let evidence = [...checked.evidence];
-  let status = checked.status;
-  if (!review) return { status, evidence, flags, reviewer: null };
+  if (!review) return { status: checked.status, evidence: [...checked.evidence], flags, reviewer: null, thirdReading: false };
 
-  const addNew = () => {
-    const have = new Set(evidence.map((e) => `${e.policyId}|${e.quote}`));
-    evidence = [...evidence, ...verifiedNewEvidence.filter((e) => !have.has(`${e.policyId}|${e.quote}`))];
+  const a = checked.status;
+  const b = review.proposedStatus;
+  const c = tieBreak?.status ?? null;
+  const merge = (first: Evidence[], second: Evidence[]) => {
+    const have = new Set(first.map((e) => `${e.policyId}|${e.quote}`));
+    return [...first, ...second.filter((e) => !have.has(`${e.policyId}|${e.quote}`))];
   };
 
-  switch (checked.status) {
-    case "covered":
-    case "conflict":
-      if (!review.agrees) {
-        flags.push({ code: "reviewer_disputed", detail: review.reason });
-        if (tieBreak?.status === checked.status) {
-          // upheld two to one; the dispute stays visible as a flag
-        } else if (tieBreak?.status === "not_covered" && review.proposedStatus === "not_covered") {
-          status = "not_covered"; // quotes are kept and shown as disputed evidence
-        } else {
-          status = "needs_review"; // three different answers, or no tie-break
-        }
-      }
-      break;
-    case "not_covered":
-      if (!review.agrees && verifiedNewEvidence.length) {
+  let status: ItemStatus = a;
+  let evidence = [...checked.evidence];
+  let thirdReading = false;
+  // for the three real answers, agreeing means giving the same one
+  let agrees = a === "needs_review" ? review.agrees : a === b;
+
+  if (a === "needs_review") {
+    // the reader said "covered" but an automatic check failed
+    if (b === "not_covered") {
+      status = "not_covered"; // quotes are kept and shown as disputed evidence
+      flags.push({ code: "reviewer_disputed", detail: review.reason });
+    } else evidence = merge(evidence, verifiedNewEvidence);
+  } else if (a === "not_covered") {
+    if (b !== "not_covered" && verifiedNewEvidence.length) {
+      thirdReading = true;
+      evidence = verifiedNewEvidence;
+      flags.push({ code: "reviewer_found_evidence", detail: review.reason });
+      status = c === b ? b : c === "not_covered" ? "not_covered" : "needs_review";
+    } else agrees = true; // an objection without a verifiable quote changes nothing
+  } else if (a === b) {
+    if (a === "conflict") {
+      thirdReading = true;
+      if (c !== "conflict") {
         status = "needs_review";
-        addNew();
-        flags.push({ code: "reviewer_found_evidence", detail: review.reason });
+        if (tieBreak) flags.push({ code: "conflict_unconfirmed", detail: tieBreak.reason });
       }
-      break;
-    case "needs_review":
-      if (verifiedNewEvidence.length) addNew();
-      break;
+    }
+  } else {
+    thirdReading = true;
+    flags.push({ code: "reviewer_disputed", detail: review.reason });
+    if (c === a) {
+      // upheld two to one (a conflict is thereby confirmed too); the dispute stays visible as a flag
+    } else if (c === b && b === "not_covered") {
+      status = "not_covered"; // quotes are kept and shown as disputed evidence
+    } else if (c === b && b === "covered") {
+      status = "covered"; // the text the reader took for a conflict states the requirement after all
+      evidence = merge(evidence, verifiedNewEvidence);
+    } else if (c === b && verifiedNewEvidence.length) {
+      status = "conflict"; // needs the reviewer's own quote of the conflicting text
+      evidence = merge(verifiedNewEvidence, evidence);
+    } else status = "needs_review";
   }
-  const settled = isDisputed(checked, review) && tieBreak ? { tieBreak } : {};
-  return { status, evidence, flags, reviewer: { agrees: review.agrees, reason: review.reason }, ...settled };
+
+  return { status, evidence, flags, reviewer: { agrees, reason: review.reason }, thirdReading, ...(thirdReading && tieBreak ? { tieBreak } : {}) };
 }
 
 /** Step 15: one verdict per question or obligation, from its items. First match wins. */

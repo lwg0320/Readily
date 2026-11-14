@@ -90,7 +90,7 @@ async function main() {
       const counts = [n("covered") && `${n("covered")} ✓`, n("not_covered") && `${n("not_covered")} ✗`, n("conflict") && `${n("conflict")} !`, n("needs_review") && `${n("needs_review")} ?`].filter(Boolean).join(" ");
       console.log(`Q${r.parentId.padEnd(3)} ${VERDICT[r.verdict].padEnd(13)} ${counts.padEnd(16)} ${r.suggestedCitation}`);
       for (const it of r.items) {
-        const failed = it.flags.filter((f) => f.code === "analysis_failed" || f.code === "list_count_mismatch");
+        const failed = it.flags.filter((f) => ["analysis_failed", "list_count_mismatch", "policies_disagree", "conflict_unconfirmed"].includes(f.code));
         if (it.status === "conflict" || it.status === "needs_review" || it.tieBreak || failed.length) {
           const cite = it.evidence[0] ? ` · ${formatCitation(it.evidence[0])}` : "";
           const numbers = it.flags.filter((f) => f.code === "number_mismatch" || f.code === "number_not_shown").map((f) => f.detail).join("; ");

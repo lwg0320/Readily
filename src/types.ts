@@ -111,6 +111,8 @@ export type FlagCode =
   | "number_not_shown"
   | "reviewer_disputed"
   | "reviewer_found_evidence"
+  | "conflict_unconfirmed"
+  | "policies_disagree"
   | "policy_predates_apl"
   | "cites_superseded_apl"
   | "quote_corrected"

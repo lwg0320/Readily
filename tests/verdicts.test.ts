@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { allCitations, buildParentResult, resolveSecondOpinion, sortByRisk, suggestedAnswerFor, suggestedCitationFor, verdictFor, isDisputed } from "../src/pipeline/verdicts";
+import { allCitations, buildParentResult, resolveSecondOpinion, sortByRisk, suggestedAnswerFor, suggestedCitationFor, verdictFor } from "../src/pipeline/verdicts";
 import type { Evidence, ItemResult, ItemStatus, ReviewDraft } from "../src/types";
 import { item } from "./helpers";
 
@@ -33,61 +33,105 @@ describe("resolveSecondOpinion (Step 13)", () => {
   const conflict = { status: "conflict" as const, evidence: [ev("III.F.1", 9)], flags: [] };
   const notCovered = { status: "not_covered" as const, evidence: [], flags: [] };
   const needsReview = { status: "needs_review" as const, evidence: [ev("III.F.1", 9)], flags: [] };
+  const says = (proposedStatus: ReviewDraft["proposedStatus"], reason = "because") => review({ agrees: false, proposedStatus, reason });
+  const tie = (status: "covered" | "not_covered" | "conflict") => ({ status, reason: "settled" });
 
-  it("covered + agrees → covered", () => {
-    expect(resolveSecondOpinion(covered, review({}), []).status).toBe("covered");
+  it("both say covered → covered, no third reading", () => {
+    const r = resolveSecondOpinion(covered, says("covered"), []);
+    expect(r).toMatchObject({ status: "covered", thirdReading: false, reviewer: { agrees: true } });
   });
-  const objects = review({ agrees: false, proposedStatus: "not_covered", reason: "no in-network language" });
-  it("covered + disagrees, tie-break sides with the reviewer → not covered, quotes kept as disputed evidence", () => {
-    const r = resolveSecondOpinion(covered, objects, [], { status: "not_covered", reason: "an element is missing" });
-    expect(r.status).toBe("not_covered");
-    expect(r.evidence).toHaveLength(1);
-    expect(r.flags.find((f) => f.code === "reviewer_disputed")?.detail).toBe("no in-network language");
-    expect(r.reviewer).toEqual({ agrees: false, reason: "no in-network language" });
-    expect(r.tieBreak).toEqual({ status: "not_covered", reason: "an element is missing" });
+  it("both say not covered → not covered, no third reading", () => {
+    expect(resolveSecondOpinion(notCovered, says("not_covered"), [])).toMatchObject({ status: "not_covered", thirdReading: false });
   });
-  it("covered + disagrees, tie-break sides with the reader → covered, with the dispute kept as a flag", () => {
-    const r = resolveSecondOpinion(covered, objects, [], { status: "covered", reason: "the carve-out is not a defect" });
-    expect(r.status).toBe("covered");
-    expect(r.flags.map((f) => f.code)).toEqual(["reviewer_disputed"]);
-    expect(r.tieBreak?.status).toBe("covered");
+
+  describe("a disputed 'covered'", () => {
+    const objects = says("not_covered", "no in-network language");
+    it("asks for a third reading; until there is one, a person decides", () => {
+      const r = resolveSecondOpinion(covered, objects, []);
+      expect(r).toMatchObject({ status: "needs_review", thirdReading: true, reviewer: { agrees: false, reason: "no in-network language" } });
+      expect(r.tieBreak).toBeUndefined();
+    });
+    it("third reading sides with the reader → covered, with the dispute kept as a flag", () => {
+      const r = resolveSecondOpinion(covered, objects, [], tie("covered"));
+      expect(r.status).toBe("covered");
+      expect(r.flags.map((f) => f.code)).toEqual(["reviewer_disputed"]);
+      expect(r.tieBreak).toEqual({ status: "covered", reason: "settled" });
+    });
+    it("third reading sides with the reviewer → not covered, quotes kept as disputed evidence", () => {
+      const r = resolveSecondOpinion(covered, objects, [], tie("not_covered"));
+      expect(r.status).toBe("not_covered");
+      expect(r.evidence).toHaveLength(1);
+      expect(r.flags.find((f) => f.code === "reviewer_disputed")?.detail).toBe("no in-network language");
+    });
+    it("three different answers → a person decides", () => {
+      expect(resolveSecondOpinion(covered, objects, [], tie("conflict")).status).toBe("needs_review");
+    });
+    it("reviewer and third reading both say conflict → conflict only with the reviewer's own quote", () => {
+      expect(resolveSecondOpinion(covered, says("conflict"), [], tie("conflict")).status).toBe("needs_review");
+      const r = resolveSecondOpinion(covered, says("conflict"), [ev("III.F.1", 9)], tie("conflict"));
+      expect(r.status).toBe("conflict");
+      expect(r.evidence.map((e) => e.address)).toEqual(["III.F.1", "II.C.2"]);
+    });
   });
-  it("covered + disagrees with no tie-break, or three different answers → a person decides", () => {
-    expect(resolveSecondOpinion(covered, objects, []).status).toBe("needs_review");
-    expect(resolveSecondOpinion(covered, objects, [], { status: "conflict", reason: "x" }).status).toBe("needs_review");
-    // the tie-break says not covered, but the reviewer had said conflict: no two readings agree
-    expect(resolveSecondOpinion(covered, review({ agrees: false, proposedStatus: "conflict" }), [], { status: "not_covered", reason: "x" }).status).toBe("needs_review");
+
+  describe("a conflict", () => {
+    it("is never reported on two readings alone: it must be confirmed", () => {
+      const r = resolveSecondOpinion(conflict, says("conflict"), []);
+      expect(r).toMatchObject({ status: "needs_review", thirdReading: true, reviewer: { agrees: true } });
+    });
+    it("confirmed by the third reading → conflict", () => {
+      const r = resolveSecondOpinion(conflict, says("conflict"), [], tie("conflict"));
+      expect(r.status).toBe("conflict");
+      expect(r.flags).toHaveLength(0);
+    });
+    it("not confirmed → a person decides, with the reason", () => {
+      const r = resolveSecondOpinion(conflict, says("conflict"), [], tie("not_covered"));
+      expect(r.status).toBe("needs_review");
+      expect(r.flags).toEqual([{ code: "conflict_unconfirmed", detail: "settled" }]);
+    });
+    it("disputed: upheld two to one → conflict; overturned → the answer the other two share", () => {
+      expect(resolveSecondOpinion(conflict, says("not_covered"), [], tie("conflict")).status).toBe("conflict");
+      expect(resolveSecondOpinion(conflict, says("not_covered"), [], tie("not_covered")).status).toBe("not_covered");
+      expect(resolveSecondOpinion(conflict, says("covered"), [], tie("covered")).status).toBe("covered");
+      expect(resolveSecondOpinion(conflict, says("covered"), [], tie("not_covered")).status).toBe("needs_review");
+    });
   });
-  it("conflict: stands when agreed or upheld; otherwise two against one or a person decides", () => {
-    expect(resolveSecondOpinion(conflict, review({}), []).status).toBe("conflict");
-    expect(resolveSecondOpinion(conflict, objects, []).status).toBe("needs_review");
-    expect(resolveSecondOpinion(conflict, objects, [], { status: "conflict", reason: "same action, looser deadline" }).status).toBe("conflict");
-    expect(resolveSecondOpinion(conflict, objects, [], { status: "not_covered", reason: "different subject" }).status).toBe("not_covered");
+
+  describe("evidence only the reviewer found", () => {
+    const found = [ev("II.A", 1)];
+    it("needs a third reading; until there is one, a person decides", () => {
+      const r = resolveSecondOpinion(notCovered, says("covered"), found);
+      expect(r).toMatchObject({ status: "needs_review", thirdReading: true });
+      expect(r.evidence).toHaveLength(1);
+      expect(r.flags.map((f) => f.code)).toContain("reviewer_found_evidence");
+    });
+    it("accepted by the third reading → the reviewer's answer with its quotes", () => {
+      expect(resolveSecondOpinion(notCovered, says("covered"), found, tie("covered"))).toMatchObject({ status: "covered", evidence: found });
+      expect(resolveSecondOpinion(notCovered, says("conflict"), found, tie("conflict")).status).toBe("conflict");
+    });
+    it("rejected by the third reading → not covered, the quotes kept as disputed evidence", () => {
+      const r = resolveSecondOpinion(notCovered, says("covered"), found, tie("not_covered"));
+      expect(r.status).toBe("not_covered");
+      expect(r.evidence).toHaveLength(1);
+    });
+    it("an objection without a verifiable quote changes nothing", () => {
+      expect(resolveSecondOpinion(notCovered, says("covered"), [])).toMatchObject({ status: "not_covered", thirdReading: false, reviewer: { agrees: true } });
+    });
   });
-  it("only a disputed 'covered' or 'conflict' goes to a tie-break", () => {
-    expect(isDisputed(covered, objects)).toBe(true);
-    expect(isDisputed(conflict, objects)).toBe(true);
-    expect(isDisputed(covered, review({}))).toBe(false);
-    expect(isDisputed(notCovered, objects)).toBe(false);
-    expect(isDisputed(covered, null)).toBe(false);
+
+  describe("a 'covered' that failed an automatic check", () => {
+    it("stays with a person, and keeps any new evidence", () => {
+      const r = resolveSecondOpinion(needsReview, says("covered"), [ev("II.D", 2)]);
+      expect(r).toMatchObject({ status: "needs_review", thirdReading: false });
+      expect(r.evidence).toHaveLength(2);
+    });
+    it("becomes not covered when the reviewer also says it is not covered", () => {
+      const r = resolveSecondOpinion(needsReview, says("not_covered"), []);
+      expect(r.status).toBe("not_covered");
+      expect(r.flags.map((f) => f.code)).toEqual(["reviewer_disputed"]);
+    });
   });
-  it("not covered + agrees → not covered", () => {
-    expect(resolveSecondOpinion(notCovered, review({}), []).status).toBe("not_covered");
-  });
-  it("not covered + reviewer found verified evidence → needs review with that evidence", () => {
-    const r = resolveSecondOpinion(notCovered, review({ agrees: false }), [ev("II.A", 1)]);
-    expect(r.status).toBe("needs_review");
-    expect(r.evidence).toHaveLength(1);
-    expect(r.flags.map((f) => f.code)).toContain("reviewer_found_evidence");
-  });
-  it("not covered + reviewer disagrees without verified evidence → not covered", () => {
-    expect(resolveSecondOpinion(notCovered, review({ agrees: false }), []).status).toBe("not_covered");
-  });
-  it("needs review stays needs review and keeps any new evidence", () => {
-    const r = resolveSecondOpinion(needsReview, review({}), [ev("II.D", 2)]);
-    expect(r.status).toBe("needs_review");
-    expect(r.evidence).toHaveLength(2);
-  });
+
   it("without a second opinion the checked result stands", () => {
     const r = resolveSecondOpinion(covered, null, []);
     expect(r.status).toBe("covered");

@@ -71,6 +71,12 @@ function simulatedApi(log: Log, state: { failedOnce: boolean; checklistTries: nu
       };
       return json({ items: ids.map((id) => ({ itemId: id, ...(user.includes("POLICY GG.1503") ? answers[id] : { status: "not_covered", wording: "same", evidence: [], reason: "nothing" }) })) });
     }
+    if (user.includes("TASK: TIE-BREAK")) {
+      log.push({ task: "tie-break", detail: String(n), body });
+      // the third reading confirms what both analysts said
+      const items = [...user.split("TASK: TIE-BREAK")[1].matchAll(/^(Q\d+-\d+):.*\n\s+Analyst A says: (\w+)\./gm)].map((m) => ({ itemId: m[1], status: m[2], reason: "confirmed" }));
+      return json({ items });
+    }
     if (user.includes("TASK: SECOND OPINION")) {
       log.push({ task: "review", detail: String(n), body });
       const task = user.split("TASK: SECOND OPINION")[1];
@@ -176,8 +182,10 @@ describe("questionnaire pipeline, Steps 7–15", () => {
     expect(r.items.every((i) => i.reviewer?.agrees)).toBe(true);
   });
 
-  it("Q11: conflict, 5 days against thirty (30)", () => {
+  it("Q11: conflict, 5 days against thirty (30), reported only after a third reading confirmed it", () => {
     const r = result(11);
+    expect(log.filter((l) => l.task === "tie-break").map((l) => l.detail)).toEqual(["11"]);
+    expect(r.items[0].tieBreak).toEqual({ status: "conflict", reason: "confirmed" });
     expect(r.verdict).toBe("conflict");
     expect(r.suggestedAnswer).toBe("no");
     expect(r.items[0].evidence[0]).toMatchObject({ address: "III.F.1", page: 9, policyId: "GG.1503" });
@@ -229,8 +237,15 @@ describe("mergeOutcomes", () => {
     expect(m.status).toBe("covered");
     expect(m.flags).toHaveLength(0);
   });
-  it("a confirmed conflict beats everything", () => {
-    expect(mergeOutcomes([o("covered"), o("conflict"), o("needs_review")]).status).toBe("conflict");
+  it("a confirmed conflict beats an open question and 'nothing found'", () => {
+    expect(mergeOutcomes([o("not_covered"), o("conflict"), o("needs_review")]).status).toBe("conflict");
+  });
+  it("one set states the requirement and another conflicts with it → a person sees both", () => {
+    const quote = (policyId: string) => ({ evidence: [{ policyId, quote: `text in ${policyId}`, page: 1, address: "II.A", kind: "body", scope: "both", status: "exact" } as any] });
+    const m = mergeOutcomes([o("covered", quote("GG.1503")), o("conflict", quote("GG.1325")), o("not_covered")]);
+    expect(m.status).toBe("needs_review");
+    expect(m.evidence.map((e) => e.policyId)).toEqual(["GG.1503", "GG.1325"]);
+    expect(m.flags[0]).toEqual({ code: "policies_disagree", detail: "GG.1503 states the requirement, but GG.1325 appears to set a different rule." });
   });
   it("confirmed evidence in one set of policies beats an open question in another", () => {
     // e.g. an unrelated policy produced a 'conflict' that the second opinion threw out

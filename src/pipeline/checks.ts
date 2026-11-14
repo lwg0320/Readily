@@ -1,6 +1,6 @@
 // Step 12 — automatic checks (ARCHITECTURE.md §8). Plain code, no AI.
 import { verifyQuote } from "../lib/quotes";
-import { extractQuantities } from "../lib/text";
+import { extractQuantities, normalize, normalizeNumbers } from "../lib/text";
 import type { Evidence, Flag, Item, ItemStatus, Policy, ReaderDraft, Regulator } from "../types";
 
 export type CheckContext = { policies: Map<string, Policy>; regulator: Regulator };
@@ -48,9 +48,13 @@ export function checkNumbers(item: Item, evidence: Evidence[]): Flag[] {
   const flags: Flag[] = [];
   if (!item.quantities.length) return flags;
   const quoted = evidence.flatMap((e) => extractQuantities(e.quote));
+  const text = evidence.map((e) => normalizeNumbers(normalize(e.quote))).join(" | ");
   for (const need of item.quantities) {
     const sameBase = quoted.filter((q) => q.unitBase === need.unitBase);
     if (sameBase.some((q) => q.value === need.value)) continue;
+    // "under age of twenty-one (21)", "day one (1) to sixty (60)": the number is there without its unit
+    const bare = new RegExp(`(^|[^\\d.])${need.value}([^\\d]|$)`).test(text);
+    if (!sameBase.length && bare) continue;
     if (sameBase.length) {
       const found = [...new Set(sameBase.map(show))].join(", ");
       flags.push({ code: "number_mismatch", detail: `Requirement: ${show(need)} · Policy: ${found}` });
