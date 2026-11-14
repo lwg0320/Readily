@@ -12,7 +12,8 @@ The full design is in [ARCHITECTURE.md](ARCHITECTURE.md).
 | Phase | What | State |
 |---|---|---|
 | 1 | Document preparation (`npm run prep`) | Done |
-| 2–4 | Shared code, API client, questionnaire pipeline | Not started |
+| 2 | Shared code and unit tests (`npm test`) | Done |
+| 3–4 | API client, questionnaire pipeline | Not started |
 | 5 | Questionnaire screens and form export | Not started |
 | 6–8 | Policy Guide, accuracy toggles, replay, accuracy page | Not started |
 
@@ -27,7 +28,10 @@ The full design is in [ARCHITECTURE.md](ARCHITECTURE.md).
   - `guides/ecm-2026-01.json` — the Policy Guide split into 141 sections
   - `search-index.json` — keyword search index over the Medi-Cal policies
 - `public/pdfs/` — the PDFs the app shows (committed).
-- `src/lib/` — text utilities shared by the prep script and the app.
+- `src/lib/` — text utilities, quote verification and search, shared by the prep script and the app.
+- `src/pipeline/` — the plain-code steps: grouping, candidate selection, automatic checks, verdicts.
+- `src/config/` — the model settings file and pipeline settings.
+- `tests/` — unit tests, run against the real prepared data (`npm test`).
 
 ## Running the document preparation
 

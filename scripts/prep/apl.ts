@@ -2,17 +2,8 @@
 import path from "node:path";
 import { pdfToPages } from "./extract";
 
-export type Apl = {
-  id: string; // file base name, e.g. "APL25-008"
-  kind: "regulator";
-  number: string; // "25-008"
-  subject: string;
-  date: string | null; // ISO
-  supersedes: string[];
-  pageCount: number;
-  pages: { page: number; text: string }[];
-  sourceFile: string;
-};
+import type { Apl } from "../../src/types";
+export type { Apl };
 
 const MONTHS = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
 

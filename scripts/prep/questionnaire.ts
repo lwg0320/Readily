@@ -3,25 +3,11 @@ import fs from "node:fs";
 import { PDFCheckBox, PDFDocument, PDFRadioGroup, PDFTextField, type PDFRef } from "pdf-lib";
 import { pdfToPages } from "./extract";
 
-export type YesNoWidget = {
-  fieldName: string;
-  fieldType: "radio" | "checkbox";
-  widgetIndex: number;
-  onState: string;
-  side: "yes" | "no";
-};
+import type { Questionnaire as StoredQuestionnaire, YesNoWidget } from "../../src/types";
+export type { YesNoWidget };
 
-export type Questionnaire = {
-  id: string;
-  title: string;
-  aplId: string;
-  aplNumber: string;
-  subject: string;
-  pageCount: number;
-  questions: { number: number; text: string; aplPages: number[]; reference: string }[];
-  formMap: null | { number: number; citationField: string; yesNo: YesNoWidget[] }[];
-  warnings: string[];
-};
+/** `warnings` is used by the prep run and not stored. */
+export type Questionnaire = StoredQuestionnaire & { warnings: string[] };
 
 const NOISE = [/^\s*Rev\.\s*\d{2}\/\d{4}\s*$/, /^\s*Yes\s+No\s*$/, /^\s*Citation:?\s*$/];
 const Q_START = /^\s*(\d{1,2})\.\s+(Do(?:es)?\b.*)$/;

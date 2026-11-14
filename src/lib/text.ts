@@ -91,18 +91,57 @@ function wordsToNumber(seq: string): number | null {
   return total;
 }
 
+type Mapped = { text: string; map: number[] };
+
+/** Regex replace that keeps, for every output character, the offset it came from. */
+function replaceMapped(input: Mapped, re: RegExp, fn: (m: RegExpMatchArray) => string | null): Mapped {
+  const out: string[] = [];
+  const map: number[] = [];
+  let last = 0;
+  for (const m of input.text.matchAll(re)) {
+    const rep = fn(m);
+    if (rep === null) continue;
+    const at = m.index!;
+    for (let i = last; i < at; i++) {
+      out.push(input.text[i]);
+      map.push(input.map[i]);
+    }
+    for (const c of rep) {
+      out.push(c);
+      map.push(input.map[at]);
+    }
+    last = at + m[0].length;
+  }
+  for (let i = last; i < input.text.length; i++) {
+    out.push(input.text[i]);
+    map.push(input.map[i]);
+  }
+  return { text: out.join(""), map };
+}
+
 /**
  * "five (5) calendar days" and "five calendar days" both become "5 calendar days".
  * Applied to both sides of a comparison, never to text shown to the user.
+ * `map` carries offsets through, so a match can be traced back to the original text.
  */
-export function normalizeNumbers(s: string): string {
-  let t = s.replace(NUM_SEQ, (m) => {
-    const n = wordsToNumber(m);
-    return n === null ? m : String(n);
+export function normalizeNumbersWithMap(input: Mapped): Mapped {
+  let t = replaceMapped(input, NUM_SEQ, (m) => {
+    const n = wordsToNumber(m[0]);
+    return n === null ? null : String(n);
   });
-  t = t.replace(/(\d+)\s*\(\s*(\d+)\s*\)/g, (m, a, b) => (a === b ? a : m));
-  t = t.replace(/(\d)\s*%/g, "$1 percent").replace(/\bper cent\b/gi, "percent");
+  t = replaceMapped(t, /(\d+)\s*\(\s*(\d+)\s*\)/g, (m) => (m[1] === m[2] ? m[1] : null));
+  t = replaceMapped(t, /(\d)\s*%/g, (m) => `${m[1]} percent`);
+  t = replaceMapped(t, /\bper cent\b/gi, () => "percent");
   return t;
+}
+
+export function normalizeNumbers(s: string): string {
+  return normalizeNumbersWithMap({ text: s, map: Array.from({ length: s.length }, (_, i) => i) }).text;
+}
+
+/** Lower-cased, whitespace-collapsed, number-normalized text for searching, with offsets back to `s`. */
+export function searchableWithMap(s: string): Mapped {
+  return normalizeNumbersWithMap(normalizeWithMap(s));
 }
 
 const UNIT_RE =

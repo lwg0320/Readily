@@ -4,27 +4,10 @@ import path from "node:path";
 import { dropPolicyFooter, indentOf, pdfToPages, type Line } from "./extract";
 import { estimateTokens } from "../../src/lib/text";
 
-export type SpanKind = "body" | "glossary" | "references";
-export type Scope = "medi-cal" | "other" | "both";
+import type { Policy as StoredPolicy, Scope, SpanKind } from "../../src/types";
 
-export type Policy = {
-  id: string;
-  title: string;
-  department: string;
-  section: string;
-  effectiveDate: string | null;
-  revisedDate: string | null;
-  programs: { mediCal: boolean; oneCare: boolean; pace: boolean; administrative: boolean };
-  pageCount: number;
-  referencedApls: string[];
-  canonicalText: string;
-  tokenEstimate: number;
-  spans: { start: number; end: number; page: number; address: string; kind: SpanKind; scope: Scope }[];
-  outline: { address: string; firstLine: string; pageStart: number; pageEnd: number }[];
-  folder: string;
-  sourceFile: string;
-  warnings: string[];
-};
+/** A parsed policy. `sourceFile` and `warnings` are used by the prep run and not stored. */
+export type Policy = StoredPolicy & { sourceFile: string; warnings: string[] };
 
 type Block = { text: string; page: number; address: string; kind: SpanKind; scope: Scope };
 

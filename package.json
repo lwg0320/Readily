@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "prep": "tsx scripts/prep/index.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
   },
   "dependencies": {
     "minisearch": "^7.1.0",
@@ -15,6 +16,7 @@
   "devDependencies": {
     "@types/node": "^22.9.0",
     "tsx": "^4.19.2",
-    "typescript": "^5.6.3"
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.9"
   }
 }

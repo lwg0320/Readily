@@ -287,6 +287,8 @@ export const PIPELINE = {
   maxChunksPerGroup: 3,
   concurrency: 6,             // parallel API calls
   keywordHitsPerItem: 2,
+  maxGroupSize: 7,            // questions per group (Steps 11–15)
+  commonTermPolicies: 15,     // an exact search term found in more policies than this is ignored
   promptVersion: "v1",        // bump to invalidate saved calls
 };
 ```
@@ -308,8 +310,8 @@ The UI toggles override `fullReading.model` and `secondOpinion.model` for the ne
 
 `verifyQuote(policy, quote) → { status: "exact" | "corrected" | "rejected", text, page, address, kind, scope }`
 
-1. Normalize the quote and the policy's canonical text. If the quote occurs, status `exact`. Take the **source** text for that range (not the model's text), and look up page, address, kind and scope from `spans` at the range start.
-2. Otherwise find the window of the canonical text with the highest token overlap (slide a window of the quote's token length ±20%, anchored on positions of the quote's first and last 6 tokens). If token-level similarity ≥ 0.90, status `corrected` and use the source text of that window.
+1. Normalize the quote and the policy's canonical text. If the quote occurs, status `exact`. Take the **source** text for that range (not the model's text), and look up page, address, kind and scope from `spans` at the range start. If the same words occur in several places (GG.1503 §II.B.3 and §II.C.3 are identical), prefer an occurrence that can be cited: not scoped to another program and not in References.
+2. Otherwise find the window of the canonical text most similar to the quote: anchor on any 5-word run of the quote that occurs in the policy, try windows of the quote's length ±20% around it, and compare word by word (edit distance, ignoring punctuation around words). If similarity ≥ 0.90, status `corrected` and use the source text of that window.
 3. Otherwise `rejected`.
 
 Quotes must be contiguous source text, at most 80 words, with no ellipses. The prompts say so.
@@ -416,7 +418,7 @@ Record a completion flag for every (policy, bundle). Step 14 depends on it.
 For each item, a policy is a candidate if any of these is true (record which, as `foundBy`):
 
 - `haiku-direct` / `haiku-maybe`: a Step 9 hit.
-- `exact`: `exactSearch` hit for one of the item's `searchTerms` (terms shorter than 4 characters are searched only together with the unit or word that follows them in the requirement).
+- `exact`: `exactSearch` hit for one of the item's `searchTerms` (terms shorter than 4 characters are searched only together with the word that follows them in the requirement; a term found in more than `commonTermPolicies` policies is too common and is ignored; hits in other-program text, or in References for items that do not allow references, do not count).
 - `keyword`: in the top `keywordHitsPerItem` policies for `keywordSearch(requirement)`.
 
 Only Medi-Cal policies. Then, per group:

@@ -2,27 +2,8 @@
 import fs from "node:fs";
 import { pdfToPages } from "./extract";
 
-export type GuideSection = {
-  id: string;
-  title: string;
-  path: string[];
-  pageStart: number;
-  pageEnd: number;
-  updated: boolean;
-  source: "bookmark" | "marker";
-  wordCount: number;
-  text: string; // with <<page N>> markers
-  parentIntro: string;
-};
-
-export type Guide = {
-  id: string;
-  title: string;
-  date: string;
-  pageCount: number;
-  sections: GuideSection[];
-  stats: { bookmarkHeadings: number; markerStarts: number; updatedSections: number; droppedShort: number; notLocated: number; footnotes: number };
-};
+import type { Guide, GuideSection } from "../../src/types";
+export type { Guide, GuideSection };
 
 const UPDATED_LINE = /^\s*(\(Updated [A-Z][a-z]+ (?:\d{1,2}, )?\d{4}\))\s*(.*)$/;
 const BARE_UPDATED = /^\(Updated [A-Z][a-z]+ (?:\d{1,2}, )?\d{4}\)$/;
