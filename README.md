@@ -13,7 +13,8 @@ The full design is in [ARCHITECTURE.md](ARCHITECTURE.md).
 |---|---|---|
 | 1 | Document preparation (`npm run prep`) | Done |
 | 2 | Shared code and unit tests (`npm test`) | Done |
-| 3–4 | API client, questionnaire pipeline | Not started |
+| 3 | API client (`npm run check:key`) | Done |
+| 4 | Questionnaire pipeline | Not started |
 | 5 | Questionnaire screens and form export | Not started |
 | 6–8 | Policy Guide, accuracy toggles, replay, accuracy page | Not started |
 
@@ -31,7 +32,16 @@ The full design is in [ARCHITECTURE.md](ARCHITECTURE.md).
 - `src/lib/` — text utilities, quote verification and search, shared by the prep script and the app.
 - `src/pipeline/` — the plain-code steps: grouping, candidate selection, automatic checks, verdicts.
 - `src/config/` — the model settings file and pipeline settings.
+- `src/llm/` — the API client: retries, concurrency limit, saved-call store, prompt caching, cost tracking.
 - `tests/` — unit tests, run against the real prepared data (`npm test`).
+
+## Checking your API key
+
+1. Create a file named `.env.local` in the repo root with one line: `ANTHROPIC_API_KEY=sk-ant-...`. The file is git-ignored. Never commit a key.
+2. `npm install`
+3. `npm run check:key`
+
+This makes five small real calls (well under one cent) and checks the key, the request format, JSON output, the saved-call store and prompt caching. Every line should say PASS.
 
 ## Running the document preparation
 

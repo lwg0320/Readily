@@ -269,11 +269,12 @@ export const MODELS = {
 } as const;
 
 export const TASKS = {
-  checklist:        { model: "haiku", effort: "high", maxTokens: 4000,  uiToggle: false },  // Step 7
-  readEveryPolicy:  { model: "haiku", effort: "low",  maxTokens: 1500,  uiToggle: false },  // Step 9
-  fullReading:      { model: "haiku", effort: "high", maxTokens: 8000,  uiToggle: true  },  // Step 11
-  secondOpinion:    { model: "haiku", effort: "high", maxTokens: 6000,  uiToggle: true  },  // Step 13
-  findObligations:  { model: "haiku", effort: "high", maxTokens: 6000,  uiToggle: false },  // Step 22
+  // thinking counts toward maxTokens on these models, so the limits are generous
+  checklist:        { model: "haiku", effort: "high", maxTokens: 8000,  uiToggle: false },  // Step 7
+  readEveryPolicy:  { model: "haiku", effort: "low",  maxTokens: 4000,  uiToggle: false },  // Step 9
+  fullReading:      { model: "haiku", effort: "high", maxTokens: 12000, uiToggle: true  },  // Step 11
+  secondOpinion:    { model: "haiku", effort: "high", maxTokens: 10000, uiToggle: true  },  // Step 13
+  findObligations:  { model: "haiku", effort: "high", maxTokens: 10000, uiToggle: false },  // Step 22
 } as const;
 ```
 
@@ -328,13 +329,14 @@ callLLM({ task, model?, system, messages, schema }) → { data, usage, fromSaved
 ```
 
 - `POST https://api.anthropic.com/v1/messages` with headers `x-api-key`, `anthropic-version: 2023-06-01`, `content-type: application/json`, `anthropic-dangerous-direct-browser-access: true`.
-- Model ID, `max_tokens` and effort come from `TASKS[task]` (or the override). **Confirm the exact request fields for thinking/effort for these models in the API docs (https://docs.claude.com) and set them in this one file.** If unsure, omit effort for `low` and enable the documented adaptive/extended thinking option for `high`.
+- Model ID, `max_tokens` and effort come from `TASKS[task]` (or the override). Effort is sent as the top-level field `output_config: { effort }` (confirmed in the API docs; Haiku 5.5 and Opus 5.5 both default to `medium`). Send no `thinking`, `temperature`, `top_p` or `top_k`: these models manage thinking themselves, Opus 5.5 rejects `thinking: disabled`, and thinking counts toward `max_tokens`. If a reply is cut off (`stop_reason: "max_tokens"`), retry once with twice the limit. Only the reply's `text` blocks are read.
 - **Output format:** every prompt ends with "Return only a JSON object inside `<json></json>` tags." Extract the last `<json>` block from the text output, `JSON.parse`, validate with the task's zod schema. On failure retry once with the validation error appended as a new user turn. On second failure throw; the pipeline marks the affected items `needs_review` with reason "model output unreadable".
 - **Prompt caching:** callers mark the end of the shared prefix with `cache_control: { type: "ephemeral" }` (see each step). Nothing else.
 - **Saved-call cache:** key = SHA-256 of `{ modelId, promptVersion, system, messages, maxTokens, effort }`. Look up in IndexedDB before calling; store `{ data, usage }` after. A hit returns immediately with `fromSavedCache: true` and zero cost. This single mechanism gives resume-after-refresh, free re-runs of unchanged steps, and instant reopening of Guide sections.
-- **Concurrency and retries:** a shared queue with `PIPELINE.concurrency` workers. On HTTP 429 or 529 or a network error, back off (honour `retry-after`, else 2s, 4s, 8s, 16s, 32s) up to 6 tries.
+- **Concurrency and retries:** a shared queue with `PIPELINE.concurrency` workers. On HTTP 429, 529, 5xx or a network error, back off (honour `retry-after`, else 2s, 4s, 8s, 16s, 32s) up to 6 tries. HTTP 401/403 (bad key) and a 400 about credit balance are never retried and stop the run.
 - **Usage:** record `input_tokens`, `cache_creation_input_tokens`, `cache_read_input_tokens`, `output_tokens` per call and convert to dollars with `MODELS[...].price`. Each run keeps a running total per task.
-- **Cache warm-up rule:** when many calls share a cached prefix, send the **first call alone and wait for it to finish**, then release the rest in parallel. Otherwise parallel calls all pay the cache-write price.
+- **Cache warm-up rule:** when many calls share a cached prefix, send the **first live call alone and wait for it to finish**, then release the rest in parallel (`warmThenAll`). Otherwise parallel calls all pay the cache-write price. A call answered from the saved-call store does not warm the API's cache, so it does not count as the first. The minimum cacheable prefix on both models is 512 tokens.
+- **Environment:** the client takes its key, `fetch`, saved-call store and `sleep` as arguments, so the same code runs in the browser (IndexedDB store, browser header on) and in Node (`npm run check:key`, tests with a mocked `fetch`).
 
 ---
 
