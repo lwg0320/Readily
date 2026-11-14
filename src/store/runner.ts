@@ -21,6 +21,8 @@ export type ActiveRun = {
   checks: number | null;
   screening: Count;
   groups: Count;
+  /** Full readings, second opinions and tie-breaks finished so far: shows the last stage is alive. */
+  readings: number;
   /** The API asked us to slow down. */
   slow: boolean;
 };
@@ -104,7 +106,7 @@ export const useRunner = create<RunnerState>((set, get) => ({
 
     const patchActive = (patch: Partial<ActiveRun>) => set((s) => (s.active ? { active: { ...s.active, ...patch } } : s));
     const zero = { done: 0, total: 0 };
-    set({ problem: null, active: { runId: base.id, sourceId: questionnaireId, stage: "library", library: zero, checklist: zero, checks: base.checkCount, screening: zero, groups: zero, slow: false } });
+    set({ problem: null, active: { runId: base.id, sourceId: questionnaireId, stage: "library", library: zero, checklist: zero, checks: base.checkCount, screening: zero, groups: zero, readings: 0, slow: false } });
 
     const controller = new AbortController();
     abort = controller;
@@ -115,7 +117,11 @@ export const useRunner = create<RunnerState>((set, get) => ({
       useRuns.getState().put({ ...current(), ...patch, cost: base.cost + tracker.totalCost, usageByTask: mergeUsage(base.usageByTask, tracker.byTask), updatedAt: Date.now() });
 
     let lastCostSave = 0;
+    let lastThrottle = 0;
     tracker.onChange(() => {
+      const n = (task: TaskKey) => (tracker.byTask[task]?.calls ?? 0) + (tracker.byTask[task]?.savedCalls ?? 0);
+      const readings = n("fullReading") + n("secondOpinion");
+      if (readings !== get().active?.readings) patchActive({ readings, slow: Date.now() - lastThrottle < 30_000 });
       // keep the running cost on screen without writing to disk on every call
       if (Date.now() - lastCostSave > 1500) {
         lastCostSave = Date.now();
@@ -137,7 +143,10 @@ export const useRunner = create<RunnerState>((set, get) => ({
           apiKey: () => useSettings.getState().apiKey,
           store: idbCallStore(),
           browser: true,
-          onThrottle: () => patchActive({ slow: true }),
+          onThrottle: () => {
+            lastThrottle = Date.now();
+            patchActive({ slow: true });
+          },
         });
         await runQuestionnaire({
           questions: questionnaire.questions,
@@ -149,8 +158,8 @@ export const useRunner = create<RunnerState>((set, get) => ({
           signal: controller.signal,
           onProgress: (e) => {
             if (e.stage === "checklist") patchActive({ stage: "checklist", checklist: { done: e.done, total: e.total } });
-            if (e.stage === "screening") patchActive({ stage: "screening", screening: { done: e.done, total: e.total }, slow: false });
-            if (e.stage === "reading") patchActive({ stage: "reading", groups: { done: e.done, total: e.total }, slow: false });
+            if (e.stage === "screening") patchActive({ stage: "screening", screening: { done: e.done, total: e.total } });
+            if (e.stage === "reading") patchActive({ stage: "reading", groups: { done: e.done, total: e.total } });
           },
           onChecklists: (lists) => {
             const checks = lists.reduce((n, c) => n + c.items.length, 0);

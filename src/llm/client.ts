@@ -199,7 +199,9 @@ export function createLLM(deps: LLMDeps) {
       let res: Response | null = null;
       let networkError: unknown = null;
       try {
-        res = await fetchFn(API_URL, { method: "POST", headers, body: JSON.stringify(body), signal });
+        // a connection that hangs (sleeping laptop, dropped Wi-Fi) must not stall a run for ever
+        const timeout = AbortSignal.timeout(PIPELINE.callTimeoutMs);
+        res = await fetchFn(API_URL, { method: "POST", headers, body: JSON.stringify(body), signal: signal ? AbortSignal.any([signal, timeout]) : timeout });
       } catch (err: any) {
         if (err?.name === "AbortError" || signal?.aborted) throw new LLMError("aborted", "Cancelled.");
         networkError = err;

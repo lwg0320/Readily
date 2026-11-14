@@ -206,7 +206,22 @@ function Progress({ active, run, policies }: { active: ActiveRun; run: Run | und
         <Step state={state(2)} detail={state(2) === "now" ? <div className="mt-2 max-w-sm"><Bar done={active.screening.done} total={active.screening.total} /></div> : undefined}>
           {state(2) === "done" ? `Read all ${policies} Medi-Cal policies against every check` : `Reading all ${policies} Medi-Cal policies against every check ${state(2) === "now" && count(active.screening) ? `(${count(active.screening)} reads)` : ""}`}
         </Step>
-        <Step state={state(3)} detail={state(3) === "now" ? <div className="mt-2 max-w-sm"><Bar done={ready} total={total} /></div> : undefined}>
+        <Step
+          state={state(3)}
+          detail={
+            state(3) === "now" ? (
+              <>
+                <div className="mt-2 max-w-sm">
+                  <Bar done={ready} total={total} />
+                </div>
+                <p className="mt-2 text-[13.5px] font-normal text-ink-soft tabular-nums">
+                  {active.readings.toLocaleString()} readings and second opinions finished so far.
+                  {ready === 0 && " Each question needs several of them, so the first answers take a few minutes; after that they arrive steadily."}
+                </p>
+              </>
+            ) : undefined
+          }
+        >
           Reading the policies that matter in full, checking every quote, and getting a second opinion {state(3) === "now" ? `(${ready} of ${total} answers ready)` : ""}
         </Step>
       </ul>

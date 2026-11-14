@@ -406,14 +406,18 @@ export async function runEvidence(args: EvidenceArgs): Promise<EvidenceRun> {
   }
 
   onProgress?.({ stage: "reading", done: 0, total: groups.length });
-  const perGroup = await Promise.all(
-    groups.map(async (g) => {
-      const results = await processGroup(g);
+  // A few groups at a time, in order: the first answers arrive after one group's chain of
+  // reading, second opinion and last look, and the rest follow steadily.
+  const perGroup: ParentResult[][] = new Array(groups.length);
+  let nextGroup = 0;
+  const worker = async () => {
+    for (let i = nextGroup++; i < groups.length; i = nextGroup++) {
+      perGroup[i] = await processGroup(groups[i]);
       onProgress?.({ stage: "reading", done: ++groupsDone, total: groups.length });
-      onGroupDone?.(results);
-      return results;
-    }),
-  );
+      onGroupDone?.(perGroup[i]);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(PIPELINE.groupsAtOnce, groups.length) }, worker));
   onProgress?.({ stage: "done" });
 
   return {

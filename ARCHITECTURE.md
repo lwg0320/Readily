@@ -292,6 +292,8 @@ export const PIPELINE = {
   maxPolicyTokensPerCall: 60_000,
   longPolicyTokens: 25_000,   // above this, send excerpts instead of the whole policy
   concurrency: 16,            // parallel API calls
+  groupsAtOnce: 5,            // Steps 11–15: groups in progress together, so answers arrive steadily
+  callTimeoutMs: 600_000,     // a call with no reply after 10 minutes is dropped and tried again
   keywordHitsPerItem: 2,
   maxGroupSize: 7,            // questions per group (Steps 11–15)
   commonTermPolicies: 15,     // an exact search term found in more policies than this is ignored
@@ -566,7 +568,7 @@ Per question or obligation, from its item statuses:
 2. Step 8.
 3. Step 9 for all bundles. Progress: "Read N of 753".
 4. Step 10.
-5. For each group, in order, with groups running in parallel up to the concurrency limit: Steps 11 → 12 → 13 → 14 → 15, then **publish that group's results to the store** so the UI can show them while later groups run.
+5. For each group, in order, `groupsAtOnce` groups at a time: Steps 11 → 12 → 13 → 14 → 15, then **publish that group's results to the store** so the UI can show them while later groups run. (Starting every group at once made all of them finish together: on the first real run in the browser the screen showed "0 of 64 answers ready" for minutes.) While this stage runs, the progress screen also counts finished readings, so it is visibly alive before the first answer arrives.
 6. Save the run (§9.2).
 
 A run can be cancelled. Because every call is in the saved-call cache, starting it again resumes where it stopped at no cost.

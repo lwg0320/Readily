@@ -5,6 +5,8 @@ export const PIPELINE = {
   maxPolicyTokensPerCall: 60_000,
   longPolicyTokens: 25_000, // above this, send excerpts instead of the whole policy
   concurrency: 16, // parallel API calls (no slow-down was requested at 10 on a full run)
+  groupsAtOnce: 5, // Steps 11–15: groups of questions in progress together, so answers arrive steadily instead of all at the end
+  callTimeoutMs: 10 * 60_000, // a call with no reply after this long is dropped and tried again
   keywordHitsPerItem: 2,
   maxGroupSize: 7, // questions per group (Steps 11–15)
   commonTermPolicies: 15, // an exact search term found in more policies than this is too common to use
