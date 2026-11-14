@@ -125,6 +125,7 @@ No backend, no database server, no embeddings, no Batch API.
     pipeline/verdicts.ts           # Steps 13 (resolution) and 15
     pipeline/runEvidence.ts        # Steps 8–15 for any set of requirements (11, 13, 14 live here)
     pipeline/runQuestionnaire.ts   # orchestrates 7–15
+    pipeline/sentences.ts          # Step 22: numbered sentences and cue words (plain code)
     pipeline/findObligations.ts    # Step 22
     pipeline/runSectionCheck.ts    # Step 24 (reuses 8–15)
     pipeline/estimate.ts           # cost + time estimates
@@ -133,10 +134,12 @@ No backend, no database server, no embeddings, no Batch API.
     store/settings.ts              # API key (localStorage)
     store/catalog.ts               # loads public/data; the full library loads when a run starts
     store/runs.ts                  # saved runs (IndexedDB), approvals and edits
+    store/guides.ts                # per Guide section: obligations found, ticks, latest check
     store/runner.ts                # start / resume / pause a run, live progress
     app.css                        # design tokens, the highlight and the approval stamp
     ui/App.tsx, Shell.tsx          # routes, header, footer
     ui/Home.tsx, QuestionnaireStart.tsx, Results.tsx, QuestionDetail.tsx
+    ui/GuidePage.tsx               # the three-column Policy Guide screen
     ui/PdfPane.tsx, findQuote.ts   # PDF page + best-effort quote highlight
     ui/SettingsDialog.tsx, RunSummary.tsx, bits.tsx, labels.ts, hooks.ts
     eval/                          # dev-only accuracy page (§12)
@@ -579,7 +582,7 @@ Steps 8–15 live in one function, `runEvidence`, that takes groups of "parents"
 
 ### Step 22 — Find obligations (`findObligations.ts`, task `findObligations`)
 
-Plain code first splits the section text into sentences (split on `. `, `; ` before a capital, and at each `»` bullet), numbers them `[S1] …`, and marks **cue sentences**: those matching `\b(must|shall|required|requires|may not|must not|should|encouraged|expected to|are expected|is expected)\b`.
+Plain code (`pipeline/sentences.ts`) first splits the section text into sentences, numbers them `S1, S2, …`, and marks **cue sentences**: those matching `\b(must|shall|required|requires|may not|must not|should|encouraged|expected to|are expected|is expected)\b`. The splitting rules: a blank line or a `»` bullet starts a new paragraph; a `<<page N>>` marker changes the page but does not end a sentence; a word broken across lines (`long-` / `term`) is rejoined; a sentence ends at `.`, `?`, `!` or `;` (with an optional footnote number, as in `Focus.16`) followed by a capital, except after an abbreviation or a list number; each footnote under `Footnotes:` is one unit with its own page. Each sentence keeps the page it starts on.
 
 One call:
 - **System:** instructions (cached; shared by all sections).
@@ -591,13 +594,17 @@ Instructions:
 
 Output: `{ obligations: {…}[], nonObligations: { sentenceId, reason }[] }`.
 
-Code checks: every `sentenceId` must exist; every cue sentence must appear in an obligation or in `nonObligations` (if any are missing, retry once listing them; any still missing are stored as `unexplained`). The obligation's source text and page come from the numbered sentences, so they are exact by construction.
+Code checks: unknown `sentenceId`s are dropped, and an obligation left with none is not kept; every cue sentence must appear in an obligation or in `nonObligations` (if any are missing, ask once more naming them; any still missing are stored as `unexplained`). The obligation's source text and page come from the numbered sentences, so they are exact by construction. Obligations are numbered `OB-01, OB-02, …`.
 
-Each obligation becomes one `Item` (`requirement` = `summary`, `allowsReference` false).
+Each obligation becomes one `Item` (`id` = the obligation's ID, `requirement` = `summary`, `allowsReference` false; as in Step 7, only numbers the summary itself states are compared with quotes).
 
 ### Step 24 — Check a section (`runSectionCheck.ts`)
 
-Input: the ticked obligations of one section. Run Step 8 (one bundle, one group), Step 9 (251 calls), Steps 10–15, with these differences: there is no APL; user block 1 puts the section text under `REGULATOR TEXT (ECM Policy Guide) — not evidence`; each obligation is one "question" with one item.
+Input: the ticked obligations of one section. Run Step 8 (one bundle, one group), Step 9 (251 calls), Steps 10–15, with these differences: there is no APL; user block 1 puts the section text under `REGULATOR TEXT (ECM Policy Guide) — not evidence`; **the section is the one "question" and its obligations are that question's items**. (The first plan made each obligation its own question. As items of one question they are read six at a time instead of one call each, and the evidence screen built for a question shows the whole section without changes.) The result is one `ParentResult` whose items carry each obligation's status, quotes, readings and search trail.
+
+The staleness check ("policy last revised before …") uses the Guide's date only for sections marked Updated: for the others, a policy older than the Guide may still be newer than the requirement.
+
+**Trying it from the terminal:** `npm run try:section` lists the sections; `npm run try:section -- s015` finds that section's obligations and checks them with the real API; `--find` stops after the obligations.
 
 ---
 
@@ -618,7 +625,7 @@ Rules: the cached part comes first and is byte-identical; warm up with one call 
 
 - **Saved-call cache** (§7.4): every API call, keyed by its full request. This is what makes re-runs cheap.
 - **Runs** (IndexedDB, `store/runs.ts`): `{ id, kind, sourceId, title, createdAt, updatedAt, status: "running" | "paused" | "done", models: { fullReading, secondOpinion }, questionCount, checkCount, policiesRead, cost, usageByTask, results: ParentResult[] }`. Approvals and edits are written into the run as Alex works (`edited: { answer, citation }` holds what she changed; absent means the suggestion stands). A run found as "running" when the app opens was interrupted and is shown as paused. Resuming adds this session's cost to the run's cost and keeps approvals.
-- **Guide sections** (IndexedDB): obligations per section, and the latest check run per section.
+- **Guide sections** (IndexedDB, `store/guides.ts`): per section, the obligations found (with the cue sentences judged not to be obligations and any left unexplained), which obligations are unticked, and the ID of the latest check. A check is an ordinary run with `kind: "section"` and a snapshot of the section and the obligations that were checked.
 - **Settings** (`localStorage`): API key.
 
 Re-running with a different toggle creates a **new run**. Unchanged steps hit the saved-call cache and cost nothing (for example switching only Second opinion to Opus re-pays only Step 13, plus cache-writing the policies for Opus).
@@ -692,14 +699,16 @@ Language in the UI is plain: "policies", "checks", "second opinion". No model ja
   - Header of the panel: "Question 11 of 64 · 3 approved" with previous / next arrows and a back link to the results table.
 - Right panel: PDF viewer on the cited policy, at the cited page. Try to highlight the quote: find the text-layer spans whose joined text contains the first 8 words of the quote (whitespace-insensitive) and give them a highlight class. If not found, just show the page with a note "Quote is on this page". Page controls and a link to open the PDF in a new tab.
 
-**Guide (`/guide/ecm-2026-01`)** — Steps 21–25. Three columns.
-- Left: table of contents (indented by path depth), page ranges, **Updated** badges, a status dot per section (not reviewed / obligations found / checked), "Show Updated only" switch, and "Updated sections reviewed: n of N".
-- Middle: section text. After Step 22, cue sentences are highlighted: green if used by an obligation, yellow if not (hover shows the reason; `unexplained` ones show "Not explained — please read").
+**Guide (`/guide/ecm-2026-01`, `/guide/ecm-2026-01/:sectionId`)** — Steps 21–25. Three columns.
+- Left: the sections. By default only the 21 Updated ones are listed (what changed in this edition is the natural place to start); a switch shows all 141, indented by depth, with an Updated badge. Each has a status dot (not reviewed / obligations found / checked) and its pages. Above the list: "Updated sections checked: n of 21".
+- Middle: the section's own text, rebuilt from the numbered sentences. After Step 22: text an obligation was taken from is **highlighted** (the same marker used for policy quotes: text the tool relies on); a cue sentence judged not to be an obligation has a dotted underline, and hovering it shows the reason; an unexplained one has a wavy underline and "please read it". Clicking an obligation outlines its sentences and scrolls to them.
 - Right:
-  - Before: **Find obligations · < $0.01**.
-  - After: obligation cards (summary, Binding/Recommended chip, page, checkbox ticked by default). Clicking a card scrolls to and outlines its sentences. "Re-run" link.
-  - **Check n obligations · ≈ $0.17**.
-  - After the check: each card shows a verdict chip and citation; Not found shows "Closest policy: GG.1355 §II.I, p.2". Clicking a card opens the same detail view as the questionnaire (route `/run/:runId/q/:n`).
+  - Before: **Find obligations** (under one cent, a few seconds).
+  - After: obligation cards (summary, a **Must** or **Should** chip, Guide page, checkbox ticked by default). **Find obligations again** asks afresh instead of reusing the saved answer.
+  - **Check n obligations against your policies**, with its estimate (about $0.25 and 4 minutes on the defaults: nearly all of it is reading every policy once against them).
+  - While checking: one line of progress with a bar, and Pause.
+  - After the check: each card shows a verdict chip and citation; Not found shows "Closest policy: GG.1355 §II.I, page 2". **See the evidence** opens the same detail view as the questionnaire (route `/run/:runId/q/:sectionId?item=OB-02`), scrolled to that obligation. There the section is shown as one question with its obligations as the parts; each part quotes the Guide sentence it comes from, which opens the Guide PDF at that page with the sentence highlighted. There is no form answer, so the answer box and its keys are not shown.
+- Home lists the Guide under "Policy Guides". Section checks do not appear among the questionnaire runs; they are reached from the Guide.
 
 ### 10.4 States every screen must handle
 
@@ -763,7 +772,7 @@ Build in this order. Do not start a phase until the previous one passes.
    - Q25: the 12 services matched to the "Hospice Care" glossary entry; the in-network item not covered → `partial`.
    - No citation anywhere to a non-Medi-Cal policy.
 5. **Questionnaire UI.** Start → progress with partial results → results → detail with PDF → approve → export filled form (open it in a PDF reader and confirm Q1, Q12 and Q64 landed in the right fields). Built without the accuracy switches, the differences view and the Policy Guide entry on Home, which belong to phases 6 and 7. `tests/export.test.ts` fills the real form and reads Q1, Q12 and Q64 back.
-6. **Guide.** Section list, find obligations on "(Updated January 2026) Community Supports" (expect two Transitional Rent obligations), highlights, check → `not_found` with a closest policy.
+6. **Guide.** Section list, find obligations on "(Updated January 2026) Community Supports" (expect two Transitional Rent obligations), highlights, check → `not_found` with a closest policy. `tests/guide.test.ts` covers the sentence splitter on every section of the real Guide, the obligation bookkeeping and the section check, with a simulated API.
 7. **Toggles, estimates, differences view, demo export/replay.**
 8. **Accuracy page.**
 

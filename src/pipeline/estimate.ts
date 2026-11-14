@@ -46,6 +46,24 @@ export function estimateQuestionnaire(args: { questions: number; mediCalPolicies
   return { cost, minutes: Math.max(1, Math.ceil(seconds / 60)) };
 }
 
+/**
+ * Checking one Guide section's obligations (Step 24). Nearly all of it is reading every policy
+ * once; the full reading and second opinion of a handful of obligations add a few cents.
+ */
+export function estimateSectionCheck(args: { obligations: number; mediCalPolicies: number; models: { fullReading: ModelKey; secondOpinion: ModelKey } }): Estimate {
+  const { obligations, mediCalPolicies, models } = args;
+  const scale = (t: Tokens, n: number): Tokens => ({ input: t.input * n, cacheWrite: t.cacheWrite * n, cacheRead: t.cacheRead * n, output: t.output * n });
+  const perCheck = 1 / PER_QUESTION.checks; // a question has about 3.3 checks
+  const sets = Math.max(1, Math.ceil(obligations / 8)); // sets of policies read in full
+  const second: Tokens = models.fullReading === models.secondOpinion ? PER_QUESTION.secondOpinion : { ...PER_QUESTION.secondOpinion, cacheWrite: PER_QUESTION.fullReading.cacheWrite };
+  const cost =
+    price(TASKS.readEveryPolicy.model, scale({ ...PER_POLICY_PER_BUNDLE, cacheRead: 600 }, mediCalPolicies)) +
+    price(models.fullReading, { ...scale(PER_QUESTION.fullReading, obligations * perCheck), cacheWrite: sets * 55_000 }) +
+    price(models.secondOpinion, { ...scale(second, obligations * perCheck), cacheWrite: second.cacheWrite ? sets * 55_000 : 0 });
+  const seconds = (mediCalPolicies * 2) / PIPELINE.concurrency + 150;
+  return { cost, minutes: Math.max(1, Math.ceil(seconds / 60)) };
+}
+
 /** "$2.30", "$48", "under $0.01" */
 export function formatCost(cost: number): string {
   if (cost > 0 && cost < 0.01) return "under $0.01";

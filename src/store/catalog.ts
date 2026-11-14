@@ -3,7 +3,7 @@
 // index (about 28 MB) load only when a run starts: looking at saved answers does not need them.
 import { create } from "zustand";
 import { createLibrary, type Library } from "../pipeline/library";
-import type { Apl, Policy, Questionnaire } from "../types";
+import type { Apl, Guide, Policy, Questionnaire } from "../types";
 
 export type PolicyMeta = Pick<Policy, "id" | "title" | "revisedDate" | "programs" | "pageCount">;
 
@@ -13,11 +13,12 @@ export type Catalog = {
   policies: PolicyMeta[];
   apls: { id: string; number: string; subject: string; date: string | null; pageCount: number }[];
   questionnaires: { id: string; title: string; aplId: string; aplNumber: string; subject: string; questionCount: number; hasFormMap: boolean }[];
+  guides: { id: string; title: string; date: string; pageCount: number; sectionCount: number; updatedSections: number }[];
 };
 
 const BASE = import.meta.env.BASE_URL;
 export const dataUrl = (path: string) => `${BASE}data/${path}`;
-export const pdfUrl = (kind: "policies" | "apl" | "questionnaires", id: string) => `${BASE}pdfs/${kind}/${id}.pdf`;
+export const pdfUrl = (kind: "policies" | "apl" | "questionnaires" | "guides", id: string) => `${BASE}pdfs/${kind}/${id}.pdf`;
 
 async function getJson<T>(path: string): Promise<T> {
   const res = await fetch(dataUrl(path));
@@ -55,6 +56,8 @@ const once = <T>(cache: Map<string, Promise<T>>, key: string, load: () => Promis
 
 const questionnaires = new Map<string, Promise<Questionnaire>>();
 const apls = new Map<string, Promise<Apl>>();
+const guides = new Map<string, Promise<Guide>>();
+export const loadGuide = (id: string) => once(guides, id, () => getJson<Guide>(`guides/${id}.json`));
 export const loadQuestionnaire = (id: string) => once(questionnaires, id, () => getJson<Questionnaire>(`questionnaires/${id}.json`));
 export const loadApl = (id: string) => once(apls, id, () => getJson<Apl>(`apl/${id}.json`));
 

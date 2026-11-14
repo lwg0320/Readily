@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { createLLM, memoryStore } from "../llm/client";
 import { idbCallStore } from "../llm/cache";
 import { useRunner } from "../store/runner";
+import { useGuides } from "../store/guides";
 import { useRuns } from "../store/runs";
 import { useSettings } from "../store/settings";
 import { Button } from "./bits";
@@ -36,9 +37,10 @@ export function SettingsDialog() {
     setTest(r.ok ? { state: "ok" } : { state: "failed", message: r.kind === "auth" ? "The key was not accepted." : r.kind === "billing" ? "The key works, but the account has no credit." : r.kind === "no_key" ? "Paste a key first." : "The API could not be reached. Check your connection and try again." });
   };
   const clearSaved = async () => {
-    if (!window.confirm("Delete every saved run and every saved API result from this browser? Running a questionnaire again will then cost the full price.")) return;
+    if (!window.confirm("Delete every saved run, every Policy Guide review and every saved API result from this browser? Running them again will then cost the full price.")) return;
     await idbCallStore().clear();
     await useRuns.getState().clearAll();
+    await useGuides.getState().clearAll();
     setCleared(true);
   };
 

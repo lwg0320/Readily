@@ -20,7 +20,7 @@ export function Shell({ children }: { children: ReactNode }) {
           {planName && <span className="border-l border-rule pl-4 text-[14px] text-ink-soft">{planName}</span>}
           <div className="ml-auto flex items-center gap-3">
             {active && (
-              <Link to={`/questionnaire/${active.sourceId}`} className="flex items-center gap-2 text-[13px] font-semibold text-stamp">
+              <Link to={active.kind === "section" ? `/guide/${active.sourceId}/${active.sectionId}` : `/questionnaire/${active.sourceId}`} className="flex items-center gap-2 text-[13px] font-semibold text-stamp">
                 <span className="h-2 w-2 animate-pulse rounded-full bg-stamp motion-reduce:animate-none" />
                 Run in progress
               </Link>

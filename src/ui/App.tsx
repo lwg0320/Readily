@@ -1,7 +1,9 @@
 import { useEffect } from "react";
 import { HashRouter, Route, Routes } from "react-router-dom";
 import { useCatalog } from "../store/catalog";
+import { useGuides } from "../store/guides";
 import { useRuns } from "../store/runs";
+import { GuidePage } from "./GuidePage";
 import { Home } from "./Home";
 import { QuestionDetail } from "./QuestionDetail";
 import { QuestionnaireStart } from "./QuestionnaireStart";
@@ -11,10 +13,12 @@ import { Page, Shell } from "./Shell";
 export function App() {
   const { catalog, error, load } = useCatalog();
   const loadRuns = useRuns((s) => s.load);
+  const loadGuides = useGuides((s) => s.load);
   useEffect(() => {
     void load();
     void loadRuns();
-  }, [load, loadRuns]);
+    void loadGuides();
+  }, [load, loadRuns, loadGuides]);
 
   return (
     <HashRouter>
@@ -31,6 +35,8 @@ export function App() {
           <Routes>
             <Route path="/" element={<Home />} />
             <Route path="/questionnaire/:id" element={<QuestionnaireStart />} />
+            <Route path="/guide/:id" element={<GuidePage />} />
+            <Route path="/guide/:id/:sectionId" element={<GuidePage />} />
             <Route path="/run/:runId" element={<Results />} />
             <Route path="/run/:runId/q/:n" element={<QuestionDetail />} />
             <Route path="*" element={<Home />} />

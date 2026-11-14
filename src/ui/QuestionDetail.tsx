@@ -1,10 +1,13 @@
-// One question: the evidence on the left, the policy page on the right (ARCHITECTURE.md §10.3, Step 17).
+// One question, or one Policy Guide section: the evidence on the left, the policy page on the
+// right (ARCHITECTURE.md §10.3, Step 17). A section is shown the same way as a question, with
+// its obligations as the parts; it has no form answer to approve.
 import { useEffect, useMemo, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { formatCitation, sortByRisk } from "../pipeline/verdicts";
 import { loadApl, loadQuestionnaire, pdfUrl, useCatalog } from "../store/catalog";
 import { currentAnswer, useRuns } from "../store/runs";
-import type { Evidence, FlagCode, ItemResult, ParentResult } from "../types";
+import type { Obligation } from "../pipeline/findObligations";
+import type { Evidence, FlagCode, ItemResult } from "../types";
 import { Button, Icon, StatusMark, VerdictChip, VerdictInfo } from "./bits";
 import { useLoaded } from "./hooks";
 import { FLAG_LABEL, VERDICT_HELP } from "./labels";
@@ -23,7 +26,10 @@ export function QuestionDetail() {
   const loaded = useRuns((s) => s.loaded);
   const patch = useRuns((s) => s.patchResult);
   const catalog = useCatalog((s) => s.catalog);
-  const questionnaire = useLoaded(run?.sourceId, () => loadQuestionnaire(run!.sourceId)).value;
+  const isSection = run?.kind === "section";
+  const [params] = useSearchParams();
+  const focusItem = params.get("item");
+  const questionnaire = useLoaded(run && !isSection ? run.sourceId : undefined, () => loadQuestionnaire(run!.sourceId)).value;
   const apl = useLoaded(questionnaire?.aplId, () => loadApl(questionnaire!.aplId)).value;
 
   const ordered = useMemo(() => (run ? sortByRisk(run.results) : []), [run]);
@@ -48,6 +54,14 @@ export function QuestionDetail() {
     quote: e.quote,
   });
   const aplTarget = (page: number): PdfTarget | null => (apl ? { url: pdfUrl("apl", apl.id), label: `APL ${apl.number} (what DHCS requires)`, page } : null);
+  const guideTarget = (page: number, quote?: string): PdfTarget => ({ url: pdfUrl("guides", run!.sourceId), label: `${run!.title} (what DHCS requires)`, page, quote });
+  const obligations = useMemo(() => new Map(run?.section?.obligations.map((o) => [o.id, o])), [run]);
+
+  // Opened from one obligation on the Guide page: bring that obligation into view.
+  useEffect(() => {
+    if (focusItem && result) document.getElementById(`check-${focusItem}`)?.scrollIntoView({ block: "start" });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusItem, !!result]);
 
   const go = (id: string | undefined) => (id ? navigate(`/run/${runId}/q/${id}`) : navigate(`/run/${runId}`));
   const previous = index > 0 ? ordered[index - 1].parentId : undefined;
@@ -77,6 +91,7 @@ export function QuestionDetail() {
   };
 
   useEffect(() => {
+    if (isSection) return; // nothing to answer or approve on a Guide section
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null;
       if (e.metaKey || e.ctrlKey || e.altKey || (t && /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)) || document.querySelector("dialog[open]")) return;
@@ -104,9 +119,16 @@ export function QuestionDetail() {
       </Page>
     );
 
-  const firstEvidence = result.items.find((i) => i.status !== "not_covered" && i.evidence.length)?.evidence[0] ?? result.items.find((i) => i.evidence.length)?.evidence[0];
-  const closest = result.items.find((i) => i.trail?.closest)?.trail?.closest;
-  const target = picked ?? (firstEvidence ? policyTarget(firstEvidence) : closest ? policyTarget(closest) : question ? aplTarget(question.aplPages[0] ?? 1) : null);
+  // what to show on the right before anything is clicked: the obligation she came for, if any
+  const first = [...result.items].sort((a, b) => Number(b.item.id === focusItem) - Number(a.item.id === focusItem));
+  const firstEvidence = first.find((i) => i.status !== "not_covered" && i.evidence.length)?.evidence[0] ?? first.find((i) => i.evidence.length)?.evidence[0];
+  const closest = first.find((i) => i.trail?.closest)?.trail?.closest;
+  const focused = focusItem ? first[0] : undefined;
+  const focusedTarget = focused?.item.id === focusItem ? (focused.evidence[0] ? policyTarget(focused.evidence[0]) : focused.trail?.closest ? policyTarget(focused.trail.closest) : null) : null;
+  const target =
+    picked ??
+    focusedTarget ??
+    (firstEvidence ? policyTarget(firstEvidence) : closest ? policyTarget(closest) : isSection ? guideTarget(run.section?.pageStart ?? 1) : question ? aplTarget(question.aplPages[0] ?? 1) : null);
   const isPicked = (e: Evidence) => !!target && target.url === pdfUrl("policies", e.policyId) && target.page === e.page && target.quote === e.quote;
 
   // only for policies an answer rests on, not for text that was looked at and set aside
@@ -122,35 +144,52 @@ export function QuestionDetail() {
     <div className="flex h-full min-h-0">
       <section className="flex w-[47%] min-w-[27rem] max-w-[48rem] flex-col border-r border-rule bg-paper">
         <div className="flex shrink-0 items-center gap-3 border-b border-rule px-5 py-2.5 text-[13px]">
-          <Link to={`/run/${runId}`} className="inline-flex items-center gap-1 font-semibold text-stamp">
-            <Icon name="left" />
-            All answers
-          </Link>
-          <span className="text-ink-soft">
-            {index + 1} of {ordered.length}, riskiest first
-          </span>
-          <span className="ml-auto text-ink-soft tabular-nums">
-            {approvedCount} of {run.questionCount} approved
-          </span>
-          <div className="flex gap-1">
-            <Button className="!px-2 !py-1" onClick={() => go(previous)} disabled={!previous} aria-label="Previous question">
+          {isSection ? (
+            <Link to={`/guide/${run.sourceId}/${n}`} className="inline-flex items-center gap-1 font-semibold text-stamp">
               <Icon name="left" />
-            </Button>
-            <Button className="!px-2 !py-1" onClick={() => go(next)} disabled={!next} aria-label="Next question">
-              <Icon name="right" />
-            </Button>
-          </div>
+              Back to the Guide section
+            </Link>
+          ) : (
+            <>
+              <Link to={`/run/${runId}`} className="inline-flex items-center gap-1 font-semibold text-stamp">
+                <Icon name="left" />
+                All answers
+              </Link>
+              <span className="text-ink-soft">
+                {index + 1} of {ordered.length}, riskiest first
+              </span>
+              <span className="ml-auto text-ink-soft tabular-nums">
+                {approvedCount} of {run.questionCount} approved
+              </span>
+              <div className="flex gap-1">
+                <Button className="!px-2 !py-1" onClick={() => go(previous)} disabled={!previous} aria-label="Previous question">
+                  <Icon name="left" />
+                </Button>
+                <Button className="!px-2 !py-1" onClick={() => go(next)} disabled={!next} aria-label="Next question">
+                  <Icon name="right" />
+                </Button>
+              </div>
+            </>
+          )}
         </div>
 
         <div className="min-h-0 flex-1 overflow-auto px-5 py-4">
           <div className="flex items-center gap-3">
-            <h1 className="text-[20px] font-bold">Question {n}</h1>
+            <h1 className="text-[20px] font-bold">{isSection ? "Policy Guide section" : `Question ${n}`}</h1>
             <div className="flex items-center gap-1">
               <VerdictChip verdict={result.verdict} />
               <VerdictInfo />
             </div>
           </div>
-          <p className="mt-2.5 font-serif text-[16.5px] leading-[1.5]">{question?.text ?? ""}</p>
+          <p className="mt-2.5 font-serif text-[16.5px] leading-[1.5]">{isSection ? run.section?.title : (question?.text ?? "")}</p>
+          {isSection && run.section && (
+            <p className="mt-1 text-[13px] text-ink-soft">
+              {run.section.path.join(" / ")}.{" "}
+              <button type="button" className="font-semibold text-stamp" onClick={() => setPicked(guideTarget(run.section!.pageStart))}>
+                Show page {run.section.pageStart} of the Guide
+              </button>
+            </p>
+          )}
 
           {question && apl && (
             <details className="mt-3 text-[14px]">
@@ -185,15 +224,30 @@ export function QuestionDetail() {
           )}
 
           <h2 className="mt-6 text-[15px] font-bold">
-            {result.items.length === 1 ? "What DHCS is asking for" : `The ${result.items.length} things DHCS is asking for`}
+            {isSection
+              ? result.items.length === 1
+                ? "The obligation that was checked"
+                : `The ${result.items.length} obligations that were checked`
+              : result.items.length === 1
+                ? "What DHCS is asking for"
+                : `The ${result.items.length} things DHCS is asking for`}
           </h2>
           <ol className="mt-2 divide-y divide-rule-soft border-y border-rule-soft">
             {result.items.map((item) => (
-              <Check key={item.item.id} item={item} titles={titles} isPicked={isPicked} onPick={(t) => setPicked(policyTarget(t))} />
+              <Check
+                key={item.item.id}
+                item={item}
+                titles={titles}
+                isPicked={isPicked}
+                onPick={(t) => setPicked(policyTarget(t))}
+                source={obligations.get(item.item.id)}
+                onShowSource={(o) => setPicked(guideTarget(o.page, o.sourceText.split(/(?<=[.;])\s+/)[0]))}
+              />
             ))}
           </ol>
         </div>
 
+        {!isSection && (
         <div className="shrink-0 border-t border-rule bg-desk/50 px-5 py-3">
           <p className="text-[13.5px] text-ink-soft">{advice}</p>
           <div className="mt-2 flex flex-wrap items-center gap-3">
@@ -264,6 +318,7 @@ export function QuestionDetail() {
             />
           )}
         </div>
+        )}
       </section>
 
       <section className="min-w-0 flex-1">{target ? <PdfPane target={target} /> : <div className="flex h-full items-center justify-center text-ink-soft">No document to show for this question.</div>}</section>
@@ -271,15 +326,33 @@ export function QuestionDetail() {
   );
 }
 
-function Check({ item, titles, isPicked, onPick }: { item: ItemResult; titles: Map<string, string>; isPicked: (e: Evidence) => boolean; onPick: (t: { policyId: string; page: number; quote?: string }) => void }) {
+type CheckProps = {
+  item: ItemResult;
+  titles: Map<string, string>;
+  isPicked: (e: Evidence) => boolean;
+  onPick: (t: { policyId: string; page: number; quote?: string }) => void;
+  /** For a Guide obligation: where in the Guide it comes from. */
+  source?: Obligation;
+  onShowSource?: (o: Obligation) => void;
+};
+
+function Check({ item, titles, isPicked, onPick, source, onShowSource }: CheckProps) {
   const disputed = item.status === "not_covered";
   const codes = new Set(item.flags.map((f) => f.code));
   const notes = item.flags.filter((f) => !TOLD_ELSEWHERE.includes(f.code));
   const trail = item.trail;
   return (
-    <li className="py-4">
+    <li className="scroll-mt-2 py-4" id={`check-${item.item.id}`}>
       <StatusMark status={item.status} />
       <p className="mt-1 text-[15px] leading-snug">{item.item.requirement}</p>
+      {source && (
+        <p className="mt-1.5 border-l-2 border-rule pl-3 text-[13.5px] text-ink-soft">
+          <span className="font-serif text-[14.5px]">“{source.sourceText}”</span>{" "}
+          <button type="button" className="font-semibold text-stamp" onClick={() => onShowSource?.(source)}>
+            Guide page {source.page}
+          </button>
+        </p>
+      )}
 
       {item.evidence.length > 0 && (
         <div className="mt-2.5 space-y-2">

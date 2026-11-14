@@ -1,6 +1,6 @@
 // The answers for one run, riskiest first (ARCHITECTURE.md §10.3, Step 16).
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 import { download, runToCsv } from "../export/csv";
 import { fillForm, type FormAnswer } from "../export/fillForm";
 import { sortByRisk } from "../pipeline/verdicts";
@@ -25,7 +25,7 @@ export function Results() {
   const catalog = useCatalog((s) => s.catalog);
   const { active, start } = useRunner();
   const hasKey = useSettings((s) => !!s.apiKey);
-  const questionnaire = useLoaded(run?.sourceId, () => loadQuestionnaire(run!.sourceId)).value;
+  const questionnaire = useLoaded(run?.kind === "questionnaire" ? run.sourceId : undefined, () => loadQuestionnaire(run!.sourceId)).value;
 
   const [filter, setFilter] = useState<Verdict | null>(null);
   const [order, setOrder] = useState<"risk" | "number">("risk");
@@ -55,6 +55,9 @@ export function Results() {
         </Link>
       </Page>
     );
+
+  // a Guide section's check is shown on the Guide page, not as a list of questions
+  if (run.kind === "section") return <Navigate to={`/guide/${run.sourceId}/${run.section?.id ?? ""}`} replace />;
 
   const counts = verdictCounts(run);
   const waiting = isActive && shown ? run.results.filter((r) => !shown.has(r.parentId)).length : 0;

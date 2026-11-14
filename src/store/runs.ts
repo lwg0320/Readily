@@ -4,12 +4,17 @@ import { clear, createStore, del, entries, set as idbSet } from "idb-keyval";
 import { create } from "zustand";
 import type { ModelKey, TaskKey } from "../config/models";
 import type { TaskUsage } from "../llm/client";
+import type { Obligation } from "../pipeline/findObligations";
 import type { ParentResult } from "../types";
 
 export type Run = {
   id: string;
-  kind: "questionnaire";
+  /** A whole questionnaire, or the obligations of one Policy Guide section. */
+  kind: "questionnaire" | "section";
+  /** The questionnaire's ID, or the Guide's. */
   sourceId: string;
+  /** For a section check: the section and the obligations that were checked, as they were then. */
+  section?: { id: string; title: string; path: string[]; pageStart: number; obligations: Obligation[] };
   title: string;
   createdAt: number;
   updatedAt: number;
