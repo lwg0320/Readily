@@ -3,7 +3,7 @@ import { MODELS } from "../config/models";
 import { formatCost } from "../pipeline/estimate";
 import type { Run } from "../store/runs";
 import type { Verdict } from "../types";
-import { VerdictChip } from "./bits";
+import { VerdictChip, VerdictInfo } from "./bits";
 import { VERDICT_ORDER } from "./labels";
 
 export const verdictCounts = (run: Run) => {
@@ -15,11 +15,12 @@ export const verdictCounts = (run: Run) => {
 export function VerdictCounts({ run }: { run: Run }) {
   const counts = verdictCounts(run);
   return (
-    <span className="flex flex-wrap gap-1.5">
+    <div className="flex flex-wrap items-center gap-1.5">
       {VERDICT_ORDER.filter((v) => counts[v] > 0).map((v) => (
         <VerdictChip key={v} verdict={v} count={counts[v]} size="sm" />
       ))}
-    </span>
+      {run.results.length > 0 && <VerdictInfo />}
+    </div>
   );
 }
 

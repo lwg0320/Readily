@@ -124,6 +124,15 @@ body {
   border-radius: 2px;
 }
 
+/* The explanation behind an info button: shown on hover, on keyboard focus, and after a tap. */
+.info-tip {
+  visibility: hidden;
+}
+.info:hover .info-tip,
+.info:focus-within .info-tip {
+  visibility: visible;
+}
+
 dialog::backdrop {
   background: rgba(24, 33, 43, 0.45);
 }

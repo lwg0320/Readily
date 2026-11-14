@@ -9,7 +9,7 @@ import { useRunner } from "../store/runner";
 import { currentAnswer, failedCount, outdatedPolicies, useRuns } from "../store/runs";
 import { useSettings } from "../store/settings";
 import type { ParentResult, Verdict } from "../types";
-import { Bar, Button, Icon, VerdictChip } from "./bits";
+import { Bar, Button, Icon, VerdictChip, VerdictInfo } from "./bits";
 import { useLoaded } from "./hooks";
 import { rowFlags, VERDICT_LABEL, VERDICT_ORDER } from "./labels";
 import { accuracyText, costText, verdictCounts } from "./RunSummary";
@@ -173,6 +173,7 @@ export function Results() {
             <VerdictChip verdict={v} count={counts[v]} size="sm" />
           </FilterButton>
         ))}
+        <VerdictInfo />
         <div className="ml-auto flex items-center gap-2 text-[13px] text-ink-soft">
           <label htmlFor="order">Order</label>
           <select id="order" value={order} onChange={(e) => setOrder(e.target.value as "risk" | "number")} className="rounded border border-rule bg-paper px-2 py-1 text-ink">

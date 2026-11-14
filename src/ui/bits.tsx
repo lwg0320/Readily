@@ -1,9 +1,9 @@
 // Small shared pieces: icons, chips, buttons.
-import type { ButtonHTMLAttributes, ReactNode } from "react";
+import { useState, type ButtonHTMLAttributes, type ReactNode } from "react";
 import type { ItemStatus, Verdict } from "../types";
-import { STATUS_LABEL, VERDICT_LABEL } from "./labels";
+import { STATUS_LABEL, VERDICT_LABEL, VERDICT_MEANING, VERDICT_ORDER } from "./labels";
 
-type IconName = "check" | "cross" | "alert" | "question" | "split" | "flag" | "gear" | "left" | "right" | "external" | "search" | "clock";
+type IconName = "check" | "cross" | "alert" | "question" | "split" | "flag" | "gear" | "left" | "right" | "external" | "search" | "clock" | "info";
 
 const PATHS: Record<IconName, ReactNode> = {
   check: <path d="M3.5 8.5l3 3 6-7" />,
@@ -43,6 +43,12 @@ const PATHS: Record<IconName, ReactNode> = {
       <path d="M10.3 10.3L14 14" />
     </>
   ),
+  info: (
+    <>
+      <circle cx="8" cy="8" r="6" />
+      <path d="M8 7.4v3.4M8 5.1v.1" />
+    </>
+  ),
   clock: (
     <>
       <circle cx="8" cy="8" r="6" />
@@ -71,11 +77,43 @@ const VERDICT_STYLE: Record<Verdict, { icon: IconName; cls: string }> = {
 export function VerdictChip({ verdict, count, size = "md" }: { verdict: Verdict; count?: number; size?: "sm" | "md" }) {
   const s = VERDICT_STYLE[verdict];
   return (
-    <span className={`inline-flex items-center gap-1.5 rounded-sm font-semibold whitespace-nowrap ${s.cls} ${size === "sm" ? "px-1.5 py-0.5 text-[12px]" : "px-2 py-1 text-[13px]"}`}>
+    <span title={VERDICT_MEANING[verdict]} className={`inline-flex items-center gap-1.5 rounded-sm font-semibold whitespace-nowrap ${s.cls} ${size === "sm" ? "px-1.5 py-0.5 text-[12px]" : "px-2 py-1 text-[13px]"}`}>
       <Icon name={s.icon} />
       {VERDICT_LABEL[verdict]}
       {count !== undefined && <span className="font-normal tabular-nums">{count}</span>}
     </span>
+  );
+}
+
+/**
+ * The info button beside any set of verdicts. Hovering it, or focusing it with the keyboard or
+ * a tap, shows what each verdict means and what to do with it.
+ */
+export function VerdictInfo() {
+  // open towards wherever there is room: a run near the bottom of the window opens upwards
+  const [place, setPlace] = useState({ up: false, right: false });
+  const measure = (e: { currentTarget: HTMLElement }) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    setPlace({ up: window.innerHeight - r.bottom < 430 && r.top > 430, right: r.left + 450 > window.innerWidth });
+  };
+  return (
+    <div className="info relative inline-flex" onMouseEnter={measure} onFocus={measure}>
+      <button type="button" aria-label="What the verdicts mean" className="flex h-6 w-6 items-center justify-center rounded-full text-ink-soft hover:bg-rule-soft hover:text-ink">
+        <Icon name="info" />
+      </button>
+      <div role="tooltip" className={`info-tip absolute z-50 w-[27rem] max-w-[calc(100vw-3rem)] ${place.up ? "bottom-full pb-1.5" : "top-full pt-1.5"} ${place.right ? "right-0" : "left-0"}`}>
+        <dl className="space-y-3 rounded-md border border-rule bg-paper p-4 text-left text-[13.5px] font-normal leading-snug text-ink shadow-lg">
+          {VERDICT_ORDER.map((v) => (
+            <div key={v}>
+              <dt>
+                <VerdictChip verdict={v} size="sm" />
+              </dt>
+              <dd className="mt-1 text-ink-soft">{VERDICT_MEANING[v]}</dd>
+            </div>
+          ))}
+        </dl>
+      </div>
+    </div>
   );
 }
 

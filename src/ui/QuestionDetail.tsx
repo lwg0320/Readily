@@ -5,7 +5,7 @@ import { formatCitation, sortByRisk } from "../pipeline/verdicts";
 import { loadApl, loadQuestionnaire, pdfUrl, useCatalog } from "../store/catalog";
 import { currentAnswer, useRuns } from "../store/runs";
 import type { Evidence, FlagCode, ItemResult, ParentResult } from "../types";
-import { Button, Icon, StatusMark, VerdictChip } from "./bits";
+import { Button, Icon, StatusMark, VerdictChip, VerdictInfo } from "./bits";
 import { useLoaded } from "./hooks";
 import { FLAG_LABEL, VERDICT_HELP } from "./labels";
 import { PdfPane, type PdfTarget } from "./PdfPane";
@@ -145,7 +145,10 @@ export function QuestionDetail() {
         <div className="min-h-0 flex-1 overflow-auto px-5 py-4">
           <div className="flex items-center gap-3">
             <h1 className="text-[20px] font-bold">Question {n}</h1>
-            <VerdictChip verdict={result.verdict} />
+            <div className="flex items-center gap-1">
+              <VerdictChip verdict={result.verdict} />
+              <VerdictInfo />
+            </div>
           </div>
           <p className="mt-2.5 font-serif text-[16.5px] leading-[1.5]">{question?.text ?? ""}</p>
 

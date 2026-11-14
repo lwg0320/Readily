@@ -17,6 +17,20 @@ export const VERDICT_HELP: Record<Verdict, string> = {
   covered: "Your policies state every part of the question.",
 };
 
+/** The longer explanation behind the info button: what the verdict means and what to do with it. */
+export const VERDICT_MEANING: Record<Verdict, string> = {
+  conflict:
+    "A policy sets a different rule from what DHCS requires, for example 30 days where DHCS says 5. It is only reported after a third reading confirms it. Suggested answer: No. The policy probably needs changing.",
+  needs_review:
+    "The checks could not settle it: the readings disagreed with each other, or an automatic check failed (for example, a number DHCS requires is missing from the quote). No answer is suggested. Look at the evidence and decide.",
+  partial:
+    "The question asks for several things. Your policies state some of them and not the others. No answer is suggested: if DHCS needs every part, the answer is No.",
+  not_found:
+    "No Medi-Cal policy states any part of this. Every policy was read, and each question shows what was searched for and the closest passage. Suggested answer: No.",
+  covered:
+    "Your policies state every part of the question. Each part has an exact quote with its section and page, and a second opinion agreed. Suggested answer: Yes.",
+};
+
 export const VERDICT_ORDER: Verdict[] = ["conflict", "needs_review", "partial", "not_found", "covered"];
 
 export const STATUS_LABEL: Record<ItemStatus, string> = {

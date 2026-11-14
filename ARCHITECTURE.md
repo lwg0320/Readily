@@ -710,7 +710,7 @@ Language in the UI is plain: "policies", "checks", "second opinion". No model ja
 - **Interrupted run** (tab closed, network lost, paused): Home shows it as "Paused, 31 of 64 answers ready" with **Resume** (free for finished work, thanks to the saved-call cache) and **Open answers so far**. A new run that stops before producing or costing anything (for example a rejected key) is removed instead of being kept as an empty paused run.
 - **A step failed for some questions:** those questions appear as Needs review with the reason "Could not be analysed — retry", and a **Retry these** button. The rest of the run is unaffected.
 - **Results arriving while she reviews:** new rows are added without reordering what is on screen. A banner says "12 more answers ready — refresh list".
-- **Verdict chips** always carry a text label and an icon, never colour alone.
+- **Verdict chips** always carry a text label and an icon, never colour alone. Wherever verdicts are shown (run lists, the answers list, a question's page) an info button beside them explains all five on hover, keyboard focus or tap: what each means and which answer it suggests (`VERDICT_MEANING` in `ui/labels.ts`).
 - **Privacy line** in the footer and in Settings: "Your policies stay in this browser. Text is sent only to the Anthropic API for analysis, using your own key."
 - **Everything is reversible** except running a paid step: approvals can be reopened, edits can be reset to the suggestion, and the filled form can be exported again at any time.
 
