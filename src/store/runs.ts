@@ -1,0 +1,92 @@
+// Saved runs (ARCHITECTURE.md §9.2). A run holds the answers for one questionnaire, plus what
+// Alex approved or changed. Runs live in IndexedDB and are mirrored here for the screens.
+import { clear, createStore, del, entries, set as idbSet } from "idb-keyval";
+import { create } from "zustand";
+import type { ModelKey, TaskKey } from "../config/models";
+import type { TaskUsage } from "../llm/client";
+import type { ParentResult } from "../types";
+
+export type Run = {
+  id: string;
+  kind: "questionnaire";
+  sourceId: string;
+  title: string;
+  createdAt: number;
+  updatedAt: number;
+  /** "paused": stopped before every answer was ready (cancelled, tab closed, key or network problem). */
+  status: "running" | "paused" | "done";
+  models: { fullReading: ModelKey; secondOpinion: ModelKey };
+  questionCount: number;
+  checkCount: number | null;
+  policiesRead: number;
+  cost: number;
+  usageByTask: Partial<Record<TaskKey, TaskUsage>>;
+  results: ParentResult[];
+};
+
+const db = createStore("readily-runs", "runs");
+
+type RunsState = {
+  runs: Record<string, Run>;
+  loaded: boolean;
+  load(): Promise<void>;
+  put(run: Run): void;
+  patchResult(runId: string, parentId: string, patch: Partial<Pick<ParentResult, "approved" | "edited" | "followUp">>): void;
+  clearAll(): Promise<void>;
+  remove(runId: string): void;
+};
+
+const persist = (run: Run) => void idbSet(run.id, run, db).catch((err) => console.error("Could not save the run", err));
+
+export const useRuns = create<RunsState>((set, get) => ({
+  runs: {},
+  loaded: false,
+  load: async () => {
+    if (get().loaded) return;
+    const runs: Record<string, Run> = {};
+    try {
+      for (const [, run] of await entries<string, Run>(db)) {
+        // a run that was "running" when the tab closed is now paused; finished calls are saved
+        runs[run.id] = run.status === "running" ? { ...run, status: "paused" } : run;
+      }
+    } catch (err) {
+      console.error("Could not read saved runs", err);
+    }
+    set({ runs: { ...runs, ...get().runs }, loaded: true });
+  },
+  put: (run) => {
+    set((s) => ({ runs: { ...s.runs, [run.id]: run } }));
+    persist(run);
+  },
+  patchResult: (runId, parentId, patch) => {
+    const run = get().runs[runId];
+    if (!run) return;
+    const results = run.results.map((r) => {
+      if (r.parentId !== parentId) return r;
+      const next = { ...r, ...patch };
+      if ("edited" in patch && patch.edited === undefined) delete next.edited;
+      if ("followUp" in patch && patch.followUp === undefined) delete next.followUp;
+      return next;
+    });
+    get().put({ ...run, results, updatedAt: Date.now() });
+  },
+  clearAll: async () => {
+    await clear(db);
+    set({ runs: {} });
+  },
+  remove: (runId) => {
+    set((s) => {
+      const { [runId]: _gone, ...rest } = s.runs;
+      return { runs: rest };
+    });
+    void del(runId, db);
+  },
+}));
+
+/** The answer and citation that would go on the form: Alex's edit if there is one, else the suggestion. */
+export function currentAnswer(r: ParentResult): { answer: "yes" | "no" | null; citation: string } {
+  return r.edited ?? { answer: r.suggestedAnswer, citation: r.suggestedCitation };
+}
+
+/** Checks that could not be analysed and can be retried. */
+export const failedCount = (run: Run) => run.results.filter((r) => r.items.some((i) => i.flags.some((f) => f.code === "analysis_failed"))).length;

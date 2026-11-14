@@ -405,6 +405,7 @@ export async function runEvidence(args: EvidenceArgs): Promise<EvidenceRun> {
     });
   }
 
+  onProgress?.({ stage: "reading", done: 0, total: groups.length });
   const perGroup = await Promise.all(
     groups.map(async (g) => {
       const results = await processGroup(g);

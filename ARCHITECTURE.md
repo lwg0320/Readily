@@ -62,10 +62,10 @@ The source folder is `Readily/`. Copy it to `source/Readily/` in the repo. Ignor
 | Concern | Choice |
 |---|---|
 | Language | TypeScript everywhere |
-| App | Vite + React 18, React Router (hash router, so it works on GitHub Pages) |
-| Styling | Tailwind CSS |
+| App | Vite + React 19, React Router (hash router, so it works on GitHub Pages). `base: "./"` keeps every URL relative. |
+| Styling | Tailwind CSS 4 (tokens in `src/app.css`); fonts bundled with the app (Public Sans for the interface, Source Serif for document text), so it also works offline |
 | State | Zustand for UI state; IndexedDB (`idb-keyval`) for saved results; `localStorage` for the API key |
-| PDF viewing | `react-pdf` (pdf.js) with the text layer enabled |
+| PDF viewing | `pdfjs-dist` used directly (one page on a canvas plus its text layer). `react-pdf` was dropped: it pins a different pdf.js version from the one prep uses, and the viewer needs its own highlight code anyway. |
 | PDF form filling | `pdf-lib` (in the browser) |
 | Search | `minisearch` (BM25-style), index built by the prep script |
 | Validation | `zod` for every model response |
@@ -83,7 +83,7 @@ No backend, no database server, no embeddings, no Batch API.
 ```
 /
   ARCHITECTURE.md
-  package.json, vite.config.ts, tailwind.config.js, tsconfig.json
+  package.json, vite.config.ts, tsconfig.json, index.html
   source/Readily/                  # the given folder, untouched (git-ignored; only needed to re-run prep)
   scripts/prep/
     index.ts                       # runs everything below in order
@@ -129,8 +129,16 @@ No backend, no database server, no embeddings, no Batch API.
     pipeline/runSectionCheck.ts    # Step 24 (reuses 8–15)
     pipeline/estimate.ts           # cost + time estimates
     export/fillForm.ts             # Step 18
-    store/*.ts
-    ui/…                           # screens and components (§10)
+    export/csv.ts                  # CSV export + browser download
+    store/settings.ts              # API key (localStorage)
+    store/catalog.ts               # loads public/data; the full library loads when a run starts
+    store/runs.ts                  # saved runs (IndexedDB), approvals and edits
+    store/runner.ts                # start / resume / pause a run, live progress
+    app.css                        # design tokens, the highlight and the approval stamp
+    ui/App.tsx, Shell.tsx          # routes, header, footer
+    ui/Home.tsx, QuestionnaireStart.tsx, Results.tsx, QuestionDetail.tsx
+    ui/PdfPane.tsx, findQuote.ts   # PDF page + best-effort quote highlight
+    ui/SettingsDialog.tsx, RunSummary.tsx, bits.tsx, labels.ts, hooks.ts
     eval/                          # dev-only accuracy page (§12)
 ```
 
@@ -607,7 +615,7 @@ Rules: the cached part comes first and is byte-identical; warm up with one call 
 ### 9.2 Saved results (between runs)
 
 - **Saved-call cache** (§7.4): every API call, keyed by its full request. This is what makes re-runs cheap.
-- **Runs** (IndexedDB): `{ id, kind: "questionnaire" | "section", sourceId, createdAt, models: { fullReading, secondOpinion }, cost, usageByTask, results: ParentResult[], foundByLog }`. Approvals and edits are written into the run as Alex works.
+- **Runs** (IndexedDB, `store/runs.ts`): `{ id, kind, sourceId, title, createdAt, updatedAt, status: "running" | "paused" | "done", models: { fullReading, secondOpinion }, questionCount, checkCount, policiesRead, cost, usageByTask, results: ParentResult[] }`. Approvals and edits are written into the run as Alex works (`edited: { answer, citation }` holds what she changed; absent means the suggestion stands). A run found as "running" when the app opens was interrupted and is shown as paused. Resuming adds this session's cost to the run's cost and keeps approvals.
 - **Guide sections** (IndexedDB): obligations per section, and the latest check run per section.
 - **Settings** (`localStorage`): API key.
 
@@ -691,11 +699,11 @@ Language in the UI is plain: "policies", "checks", "second opinion". No model ja
 
 ### 10.4 States every screen must handle
 
-- **Loading the library** (first seconds after opening): a progress bar, "Loading 373 policies…". Nothing else is clickable until it finishes.
+- **Loading the library.** The small catalogue (`library.json`) loads when the app opens. The full text of the 251 Medi-Cal policies and the search index (about 28 MB) load only when a run starts, as the first line of the progress list ("Loading 251 Medi-Cal policies"). Reading saved answers never needs them, so the app opens at once and a visitor without a key downloads almost nothing.
 - **No API key:** saved and demo runs are fully viewable; Run buttons read "Add your API key to run live" and open Settings.
 - **Bad key or no credit** (HTTP 401 / 403 / 400 billing): stop the run at once and show one plain message with a button to Settings. Do not retry.
 - **Slow run** (rate limited): the progress screen says "The API is limiting our speed. Still working; nothing is lost." Never show raw error text.
-- **Interrupted run** (tab closed, network lost, cancelled): Home shows it as "Paused · 31 of 64 answers ready" with **Resume** (free for finished work, thanks to the saved-call cache) and **Open results so far**.
+- **Interrupted run** (tab closed, network lost, paused): Home shows it as "Paused, 31 of 64 answers ready" with **Resume** (free for finished work, thanks to the saved-call cache) and **Open answers so far**. A new run that stops before producing or costing anything (for example a rejected key) is removed instead of being kept as an empty paused run.
 - **A step failed for some questions:** those questions appear as Needs review with the reason "Could not be analysed — retry", and a **Retry these** button. The rest of the run is unaffected.
 - **Results arriving while she reviews:** new rows are added without reordering what is on screen. A banner says "12 more answers ready — refresh list".
 - **Verdict chips** always carry a text label and an icon, never colour alone.
@@ -704,12 +712,15 @@ Language in the UI is plain: "policies", "checks", "second opinion". No model ja
 
 ### 10.5 Estimates (`pipeline/estimate.ts`)
 
-Simple formulas from config and prices; show one significant range, e.g. "≈ $0.95".
+Averages measured on the full 64-question run (211 checks, 251 policies), multiplied by the price table in `config/models.ts`:
 
-- Step 9: `bundles × 1.2M × input + calls × 400 × output` (+ small cached prefix).
-- Steps 11+13: per group `50k × cacheWrite`, per call `50k × cacheRead + 2.5k × input + 3k × output`; if the two models differ, add a second cache write per group.
-- Time: `calls / (concurrency × 0.5 calls per second)`, rounded up to whole minutes, shown as "about N minutes".
-- After a run, always show the **actual** cost from recorded usage.
+- Step 7, per question: 1.3k input, 0.8k cache read, 1.1k output.
+- Step 9, per policy per bundle: 8.2k input, 4.9k cache read, 140 output.
+- Step 11, per question: 9.4k input, 42k cache write, 492k cache read, 8.5k output.
+- Step 13 with its tie-breaks, per question: 4.8k input, 309k cache read, 9.4k output. If the two models differ, it also pays the 42k cache write.
+- Time: about 2 s per Step 9 call and 10 s per reading call, divided by `concurrency`, plus about 3 minutes for the longest chain.
+
+This gives about **$2.26 and 11 minutes** on the defaults (measured: $2.23) and about **$50** with both steps on Opus. After a run, always show the **actual** cost from recorded usage. Work already saved in the browser is reused, so a repeat run costs less than the estimate; the start screen says so.
 
 ---
 
@@ -747,12 +758,12 @@ Build in this order. Do not start a phase until the previous one passes.
    - Q11: flag `number_mismatch` (5 vs 30) or verdict `conflict`, citing §III.F.1.
    - Q25: the 12 services matched to the "Hospice Care" glossary entry; the in-network item not covered → `partial`.
    - No citation anywhere to a non-Medi-Cal policy.
-5. **Questionnaire UI.** Start → progress with partial results → results → detail with PDF → approve → export filled form (open it in a PDF reader and confirm Q1, Q12 and Q64 landed in the right fields).
+5. **Questionnaire UI.** Start → progress with partial results → results → detail with PDF → approve → export filled form (open it in a PDF reader and confirm Q1, Q12 and Q64 landed in the right fields). Built without the accuracy switches, the differences view and the Policy Guide entry on Home, which belong to phases 6 and 7. `tests/export.test.ts` fills the real form and reads Q1, Q12 and Q64 back.
 6. **Guide.** Section list, find obligations on "(Updated January 2026) Community Supports" (expect two Transitional Rent obligations), highlights, check → `not_found` with a closest policy.
 7. **Toggles, estimates, differences view, demo export/replay.**
 8. **Accuracy page.**
 
-Expected cost of one full questionnaire run on defaults: about $1.30 (reading every policy is about $0.80 of that, now that real token counts are known). A full run of the three demo Guide sections: about $0.80.
+Measured cost of one full questionnaire run on defaults: $2.23 (reading every policy $0.71, full reading $0.98, second opinion and tie-breaks $0.49, checklists $0.04), in about 12 minutes at 10 parallel calls. A full run of the three demo Guide sections: about $0.80.
 
 ---
 

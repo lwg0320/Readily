@@ -1,0 +1,129 @@
+@import "tailwindcss";
+@import "@fontsource-variable/public-sans";
+@import "@fontsource-variable/source-serif-4";
+@import "@fontsource-variable/source-serif-4/wght-italic.css";
+
+/*
+  Design notes.
+  Two voices: the interface speaks in Public Sans (the U.S. government's own typeface, fitting a
+  tool whose reader is a regulator); anything that is document text — a DHCS question, a policy
+  quote — is set in Source Serif, so it is always clear what the plan's documents say and what
+  the tool says.
+  Two marks carry meaning and are used for nothing else: highlighter yellow for quoted policy
+  text, and stamp-ink violet for what Alex has approved (and for the actions that lead there).
+*/
+@theme {
+  --font-sans: "Public Sans Variable", "Public Sans", system-ui, sans-serif;
+  --font-serif: "Source Serif 4 Variable", "Source Serif 4", Georgia, serif;
+
+  --color-desk: #edf0f3;
+  --color-paper: #ffffff;
+  --color-ink: #18212b;
+  --color-ink-soft: #51606f;
+  --color-ink-faint: #7b8794;
+  --color-rule: #d5dbe1;
+  --color-rule-soft: #e6eaee;
+
+  --color-stamp: #4a2f8f;
+  --color-stamp-dark: #38226f;
+  --color-stamp-wash: #efeaf8;
+  --color-marker: #ffe873;
+  --color-marker-soft: #fff6c2;
+
+  --color-conflict: #b42318;
+  --color-conflict-wash: #fdecea;
+  --color-review: #8f5200;
+  --color-review-wash: #fff1d1;
+  --color-partial: #1b5fae;
+  --color-partial-wash: #e6f0fb;
+  --color-notfound: #4b5866;
+  --color-notfound-wash: #e9edf1;
+  --color-covered: #0b6b43;
+  --color-covered-wash: #e2f4ea;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+body {
+  background: var(--color-desk);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-stamp);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/* Quoted policy text: the only thing that is ever highlighted. */
+.quote-mark {
+  background: linear-gradient(to bottom, transparent 12%, var(--color-marker) 12%, var(--color-marker) 88%, transparent 88%);
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+  padding: 0 0.12em;
+}
+.quote-mark.disputed {
+  background: linear-gradient(to bottom, transparent 12%, var(--color-rule-soft) 12%, var(--color-rule-soft) 88%, transparent 88%);
+}
+
+/* The approval stamp. Pressed once when an answer is approved. */
+.stamp {
+  display: inline-block;
+  border: 2px solid var(--color-stamp);
+  color: var(--color-stamp);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 0.1em 0.55em;
+  border-radius: 3px;
+  transform: rotate(-4deg);
+}
+@keyframes stamp-press {
+  0% { transform: rotate(-4deg) scale(1.6); opacity: 0; }
+  60% { transform: rotate(-4deg) scale(0.94); opacity: 1; }
+  100% { transform: rotate(-4deg) scale(1); opacity: 1; }
+}
+.stamp.pressed {
+  animation: stamp-press 260ms ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .stamp.pressed { animation: none; }
+}
+
+/* pdf.js text layer (the part of pdf_viewer.css this app needs) */
+.textLayer {
+  position: absolute;
+  text-align: initial;
+  inset: 0;
+  overflow: clip;
+  opacity: 1;
+  line-height: 1;
+  text-size-adjust: none;
+  forced-color-adjust: none;
+  transform-origin: 0 0;
+  z-index: 0;
+}
+.textLayer :is(span, br) {
+  color: transparent;
+  position: absolute;
+  white-space: pre;
+  cursor: text;
+  transform-origin: 0% 0%;
+}
+.textLayer ::selection {
+  background: rgba(74, 47, 143, 0.25);
+}
+.textLayer span.quote-hit {
+  background: rgba(255, 221, 51, 0.45);
+  border-radius: 2px;
+}
+
+dialog::backdrop {
+  background: rgba(24, 33, 43, 0.45);
+}

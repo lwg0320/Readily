@@ -152,7 +152,8 @@ export type ParentResult = {
   suggestedAnswer: "yes" | "no" | null;
   suggestedCitation: string;
   approved: boolean;
-  edited?: { answer: "yes" | "no"; citation: string };
+  /** What Alex changed. Absent means the suggestion stands. */
+  edited?: { answer: "yes" | "no" | null; citation: string };
   followUp?: string;
 };
 

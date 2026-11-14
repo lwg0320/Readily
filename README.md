@@ -15,8 +15,26 @@ The full design is in [ARCHITECTURE.md](ARCHITECTURE.md).
 | 2 | Shared code and unit tests (`npm test`) | Done |
 | 3 | API client (`npm run check:key`) | Done |
 | 4 | Questionnaire pipeline (`npm run try -- 10 11 25`, or `--all`) | Done; checked against the real API on all 64 questions (about $2.20 and 12 minutes on Haiku from scratch) |
-| 5 | Questionnaire screens and form export | Not started |
+| 5 | Questionnaire screens and form export (`npm run dev`) | Done; every screen driven in Chrome against a simulated API. Not yet run in a browser with a real key. |
 | 6–8 | Policy Guide, accuracy toggles, replay, accuracy page | Not started |
+
+## Running the app
+
+```
+npm install
+npm run dev
+```
+
+Open the address it prints (normally http://localhost:5173).
+
+1. Click **Settings**, paste your Anthropic API key, and press **Test key**. The key is stored only in that browser.
+2. Click **Answer this questionnaire**, then **Run all 64 questions**. A full run is about $2.30 and 10 minutes on the default settings. You can start reviewing as soon as the first answers arrive.
+3. Open a question: the evidence is on the left, the policy page with the quote highlighted is on the right. Choose Yes or No, approve, and move on (keys: J, K, Y, N, A).
+4. **Fill DHCS form** downloads the real form with your approved answers; **Download CSV** has everything.
+
+Finished work is saved in the browser. A run that is paused, or interrupted by closing the tab, resumes without paying again. The browser's saved work is separate from what `npm run try` saves under `.cache/`, so the first run in the browser pays the full price even if you already ran the command line.
+
+`npm run build` produces the static site in `dist/` (it works from any folder, including GitHub Pages).
 
 ## What is in the repo
 
@@ -33,6 +51,9 @@ The full design is in [ARCHITECTURE.md](ARCHITECTURE.md).
 - `src/pipeline/` — the plain-code steps: grouping, candidate selection, automatic checks, verdicts.
 - `src/config/` — the model settings file and pipeline settings.
 - `src/llm/` — the API client: retries, concurrency limit, saved-call store, prompt caching, cost tracking.
+- `src/store/` — what the screens share: the API key, the library, saved runs, and the controller that runs the pipeline in the browser.
+- `src/ui/` — the screens: start, run progress, answers, and one question with its policy page.
+- `src/export/` — the filled DHCS form and the CSV.
 - `tests/` — unit tests, run against the real prepared data (`npm test`).
 
 ## Checking your API key
