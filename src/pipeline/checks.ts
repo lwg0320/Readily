@@ -40,6 +40,9 @@ export function verifyEvidence(
   return { evidence, flags };
 }
 
+/** "5 calendar days", "1 month", "51 percent" */
+const show = (q: { value: number; unit: string }) => `${q.value} ${q.unit}${q.unit === "percent" || q.value === 1 ? "" : "s"}`;
+
 /** Check 4: numbers and deadlines in the requirement must appear in the quotes. */
 export function checkNumbers(item: Item, evidence: Evidence[]): Flag[] {
   const flags: Flag[] = [];
@@ -49,10 +52,10 @@ export function checkNumbers(item: Item, evidence: Evidence[]): Flag[] {
     const sameBase = quoted.filter((q) => q.unitBase === need.unitBase);
     if (sameBase.some((q) => q.value === need.value)) continue;
     if (sameBase.length) {
-      const found = [...new Set(sameBase.map((q) => `${q.value} ${q.unit}s`))].join(", ");
-      flags.push({ code: "number_mismatch", detail: `Requirement: ${need.value} ${need.unit}s · Policy: ${found}` });
+      const found = [...new Set(sameBase.map(show))].join(", ");
+      flags.push({ code: "number_mismatch", detail: `Requirement: ${show(need)} · Policy: ${found}` });
     } else {
-      flags.push({ code: "number_not_shown", detail: `Requirement: ${need.value} ${need.unit}s · not shown in the quoted text` });
+      flags.push({ code: "number_not_shown", detail: `Requirement: ${show(need)} · not shown in the quoted text` });
     }
   }
   return flags;

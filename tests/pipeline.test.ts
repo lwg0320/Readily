@@ -221,13 +221,33 @@ describe("questionnaire pipeline, Steps 7–15", () => {
 });
 
 describe("mergeOutcomes", () => {
-  const o = (status: any, n = 0) => ({ status, evidence: [], flags: n ? [{ code: "reviewer_disputed" as const, detail: "x" }] : [], readerReason: status, reviewer: null });
-  it("lets the strongest status win and takes flags only from the winners", () => {
-    const m = mergeOutcomes([o("not_covered", 1), o("covered")]);
+  const o = (status: any, extra: object = {}) => ({ status, evidence: [], flags: [], readerReason: status, reviewer: null, ...extra });
+  const disputed = { flags: [{ code: "reviewer_disputed" as const, detail: "x" }] };
+  const failed = { failed: true, flags: [{ code: "analysis_failed" as const, detail: "could not be read" }] };
+  it("takes the status, evidence and flags from the winning outcome only", () => {
+    const m = mergeOutcomes([o("not_covered", disputed), o("covered")]);
     expect(m.status).toBe("covered");
     expect(m.flags).toHaveLength(0);
-    expect(mergeOutcomes([o("covered"), o("conflict")]).status).toBe("conflict");
-    expect(mergeOutcomes([o("covered"), o("needs_review")]).status).toBe("needs_review");
+  });
+  it("a confirmed conflict beats everything", () => {
+    expect(mergeOutcomes([o("covered"), o("conflict"), o("needs_review")]).status).toBe("conflict");
+  });
+  it("confirmed evidence in one set of policies beats an open question in another", () => {
+    // e.g. an unrelated policy produced a 'conflict' that the second opinion threw out
+    const m = mergeOutcomes([o("needs_review", disputed), o("covered")]);
+    expect(m.status).toBe("covered");
+    expect(m.flags).toHaveLength(0);
+  });
+  it("a set that could not be read never hides evidence found in another set", () => {
+    const m = mergeOutcomes([o("needs_review", failed), o("covered")]);
+    expect(m.status).toBe("covered");
+    expect(m.flags).toHaveLength(0);
+    expect(mergeOutcomes([o("needs_review", failed), o("needs_review", disputed)]).flags.map((f) => f.code)).toEqual(["reviewer_disputed"]);
+  });
+  it("but nothing is called not found while a read is missing", () => {
+    const m = mergeOutcomes([o("not_covered"), o("needs_review", failed), o("not_covered")]);
+    expect(m.status).toBe("needs_review");
+    expect(m.flags.map((f) => f.code)).toEqual(["analysis_failed"]);
   });
   it("is not covered when nothing was read", () => {
     expect(mergeOutcomes([]).status).toBe("not_covered");

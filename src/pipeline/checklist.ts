@@ -9,15 +9,21 @@ import type { OnProgress } from "./progress";
 export type QuestionChecklist = { question: Question; items: Item[]; flags: Flag[] };
 
 export function toItems(question: Question, out: ChecklistOutput): Item[] {
-  return out.items.map((it, i) => ({
-    id: `Q${question.number}-${String(i + 1).padStart(2, "0")}`,
-    parentId: String(question.number),
-    requirement: it.requirement.trim(),
-    // units are parsed by our own code so they compare cleanly with quoted text later
-    quantities: dedupe(it.quantities.flatMap((q) => extractQuantities(q))),
-    searchTerms: [...new Set(it.searchTerms.map((t) => t.trim()).filter(Boolean))].slice(0, 4),
-    allowsReference: it.allowsReference,
-  }));
+  return out.items.map((it, i) => {
+    const requirement = it.requirement.trim();
+    // Units are parsed by our own code so they compare cleanly with quoted text later. Only
+    // numbers the requirement sentence itself states are kept: the model sometimes adds
+    // numbers from the surrounding APL text, and a quote cannot be expected to show those.
+    const stated = new Set(extractQuantities(requirement).map((q) => `${q.value}|${q.unitBase}`));
+    return {
+      id: `Q${question.number}-${String(i + 1).padStart(2, "0")}`,
+      parentId: String(question.number),
+      requirement,
+      quantities: dedupe(it.quantities.flatMap((q) => extractQuantities(q))).filter((q) => stated.has(`${q.value}|${q.unitBase}`)),
+      searchTerms: [...new Set(it.searchTerms.map((t) => t.trim()).filter(Boolean))].slice(0, 4),
+      allowsReference: it.allowsReference,
+    };
+  });
 }
 
 function dedupe<T extends { value: number; unitBase: string }>(qs: T[]): T[] {

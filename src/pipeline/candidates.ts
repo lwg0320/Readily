@@ -8,22 +8,25 @@ import type { FoundBy, Item, Policy } from "../types";
 
 export type ScreeningHit = { policyId: string; itemId: string; address: string; strength: "direct" | "maybe" };
 
-export type Candidate = { foundBy: Set<FoundBy>; addresses: Set<string> };
+/** `strong`: the Step 9 reader called it direct, or a rare exact term was found in it. Strong candidates are always read in full. */
+export type Candidate = { foundBy: Set<FoundBy>; addresses: Set<string>; strong: boolean };
 /** itemId → policyId → how it was found */
 export type CandidateMap = Map<string, Map<string, Candidate>>;
 
 export type ChunkPolicy = { policyId: string; mode: "full" | "excerpt"; text: string; tokens: number };
 export type Chunk = { index: number; policies: ChunkPolicy[]; tokens: number; itemIds: string[] };
+/** `skipped`: weaker candidates that did not fit. Step 14 reads them before an item is called "not found". */
 export type GroupCandidates = { chunks: Chunk[]; skipped: { policyId: string; itemIds: string[] }[] };
 
-type Config = Pick<typeof PIPELINE, "maxPolicyTokensPerCall" | "longPolicyTokens" | "maxChunksPerGroup" | "keywordHitsPerItem" | "commonTermPolicies">;
+type Config = Pick<typeof PIPELINE, "maxPolicyTokensPerCall" | "longPolicyTokens" | "keywordHitsPerItem" | "commonTermPolicies" | "rareTermPolicies">;
 
-function add(map: CandidateMap, itemId: string, policyId: string, by: FoundBy, address?: string) {
+function add(map: CandidateMap, itemId: string, policyId: string, by: FoundBy, strong: boolean, address?: string) {
   let perItem = map.get(itemId);
   if (!perItem) map.set(itemId, (perItem = new Map()));
   let c = perItem.get(policyId);
-  if (!c) perItem.set(policyId, (c = { foundBy: new Set(), addresses: new Set() }));
+  if (!c) perItem.set(policyId, (c = { foundBy: new Set(), addresses: new Set(), strong: false }));
   c.foundBy.add(by);
+  if (strong) c.strong = true;
   if (address) c.addresses.add(address);
 }
 
@@ -49,7 +52,7 @@ export function collectCandidates(
   for (const h of hits) {
     const p = policies.get(h.policyId);
     if (!p || !p.programs.mediCal || !itemIds.has(h.itemId)) continue;
-    add(map, h.itemId, h.policyId, h.strength === "direct" ? "haiku-direct" : "haiku-maybe", h.address);
+    add(map, h.itemId, h.policyId, h.strength === "direct" ? "haiku-direct" : "haiku-maybe", h.strength === "direct", h.address);
   }
 
   for (const item of items) {
@@ -61,12 +64,14 @@ export function collectCandidates(
         .filter((h) => h.scope !== "other" && (h.kind !== "references" || item.allowsReference));
       const distinct = new Set(found.map((h) => h.policyId));
       if (distinct.size > cfg.commonTermPolicies) continue; // too common to point anywhere
-      for (const h of found) add(map, item.id, h.policyId, "exact", h.address);
+      // a term only a handful of policies contain is a strong pointer; a more widespread one is a hint
+      const rare = distinct.size <= cfg.rareTermPolicies;
+      for (const h of found) add(map, item.id, h.policyId, "exact", rare, h.address);
     }
     for (const top of search.topPolicies(item.requirement, cfg.keywordHitsPerItem)) {
       const p = policies.get(top.policyId);
       if (!p || !p.programs.mediCal) continue;
-      add(map, item.id, top.policyId, "keyword", top.best.address);
+      add(map, item.id, top.policyId, "keyword", false, top.best.address);
     }
   }
   return map;
@@ -133,8 +138,15 @@ export function excerptPolicy(policy: Policy, hitAddresses: string[], fallbackQu
 
 // ------------------------------------------------------------------ packing into calls
 
-const SCORE: Record<FoundBy, number> = { "haiku-direct": 3, exact: 2, "haiku-maybe": 1, keyword: 1 };
+const SCORE: Record<FoundBy, number> = { "haiku-direct": 3, exact: 1, "haiku-maybe": 1, keyword: 1 };
 
+/**
+ * Decides which policies are read in full for a group, and packs them into calls.
+ * - Strong candidates are always read, however many calls that takes.
+ * - Weaker ones (a "maybe", a widespread exact term, a keyword hit) only fill the room left in
+ *   those calls. If there are no strong candidates at all, the best weaker ones share one call.
+ * - Whatever is left over is returned as `skipped`.
+ */
 export function buildChunks(
   groupItems: Item[],
   candidates: CandidateMap,
@@ -151,7 +163,10 @@ export function buildChunks(
       let row = rows.get(policyId);
       if (!row) rows.set(policyId, (row = { policy, score: 0, required: false, itemIds: [], addresses: [], queries: [] }));
       for (const by of c.foundBy) row.score += SCORE[by];
-      if (c.foundBy.has("haiku-direct") || c.foundBy.has("exact")) row.required = true;
+      if (c.strong) {
+        row.required = true;
+        row.score += 2;
+      }
       row.itemIds.push(item.id);
       row.addresses.push(...c.addresses);
       row.queries.push(item.requirement);
@@ -161,6 +176,7 @@ export function buildChunks(
   const ordered = [...rows.values()].sort(
     (a, b) => Number(b.required) - Number(a.required) || b.score - a.score || a.policy.id.localeCompare(b.policy.id),
   );
+  const anyRequired = ordered.some((r) => r.required);
 
   const chunks: (Chunk & { items: Set<string> })[] = [];
   const skipped: GroupCandidates["skipped"] = [];
@@ -172,8 +188,8 @@ export function buildChunks(
     const tokens = estimateTokens(text);
     let target = chunks.find((c) => c.tokens + tokens <= cfg.maxPolicyTokensPerCall);
     if (!target) {
-      // required policies always get read; optional ones only while there is room
-      if (!row.required && chunks.length >= cfg.maxChunksPerGroup) {
+      const mayOpenCall = row.required || (!anyRequired && chunks.length === 0);
+      if (!mayOpenCall) {
         skipped.push({ policyId: row.policy.id, itemIds: row.itemIds });
         continue;
       }
@@ -193,10 +209,12 @@ export function buildChunks(
 }
 
 /** For the accuracy page: which layer found each policy for each item. */
-export function foundByLog(candidates: CandidateMap): { itemId: string; policyId: string; foundBy: FoundBy[] }[] {
-  const out: { itemId: string; policyId: string; foundBy: FoundBy[] }[] = [];
+export type FoundByEntry = { itemId: string; policyId: string; foundBy: FoundBy[]; strong: boolean };
+
+export function foundByLog(candidates: CandidateMap): FoundByEntry[] {
+  const out: FoundByEntry[] = [];
   for (const [itemId, perItem] of candidates) {
-    for (const [policyId, c] of perItem) out.push({ itemId, policyId, foundBy: [...c.foundBy] });
+    for (const [policyId, c] of perItem) out.push({ itemId, policyId, foundBy: [...c.foundBy], strong: c.strong });
   }
   return out;
 }

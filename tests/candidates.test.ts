@@ -5,7 +5,7 @@ import type { Policy } from "../src/types";
 import { item, loadPolicy, loadSearchIndex } from "./helpers";
 
 const IDS = ["GG.1503", "GG.1550", "GG.1422", "GG.1355", "AA.1000", "MA.6113"];
-const CFG = { maxPolicyTokensPerCall: 60_000, longPolicyTokens: 25_000, maxChunksPerGroup: 3, keywordHitsPerItem: 2, commonTermPolicies: 15 };
+const CFG = { maxPolicyTokensPerCall: 60_000, longPolicyTokens: 25_000, keywordHitsPerItem: 2, commonTermPolicies: 15, rareTermPolicies: 5 };
 let policies: Map<string, Policy>;
 let search: Search;
 beforeAll(() => {
@@ -40,6 +40,22 @@ describe("collectCandidates (Step 10)", () => {
   it("ignores hits on policies that do not apply to Medi-Cal", () => {
     const c = collectCandidates([q15], [{ policyId: "MA.6113", itemId: "Q15-01", address: "II.A", strength: "direct" }], policies, search, CFG);
     expect(c.get("Q15-01")?.has("MA.6113") ?? false).toBe(false);
+  });
+  it("treats a rare exact term as a must-read and a widespread one as a hint", () => {
+    const rare = collectCandidates([q53], [], policies, search, { ...CFG, keywordHitsPerItem: 0 });
+    expect(rare.get("Q53-01")!.get("GG.1503")!.strong).toBe(true);
+    const widespread = collectCandidates([q53], [], policies, search, { ...CFG, keywordHitsPerItem: 0, rareTermPolicies: 0 });
+    expect(widespread.get("Q53-01")!.get("GG.1503")!.foundBy.has("exact")).toBe(true);
+    expect(widespread.get("Q53-01")!.get("GG.1503")!.strong).toBe(false);
+  });
+  it("makes a 'direct' hit a must-read, but not a 'maybe' or a keyword hit", () => {
+    const hits: ScreeningHit[] = [
+      { policyId: "GG.1503", itemId: "Q15-01", address: "II.C.2", strength: "direct" },
+      { policyId: "GG.1550", itemId: "Q15-01", address: "II.A", strength: "maybe" },
+    ];
+    const c = collectCandidates([q15], hits, policies, search, CFG);
+    expect(c.get("Q15-01")!.get("GG.1503")!.strong).toBe(true);
+    expect([...c.get("Q15-01")!.values()].filter((x) => x.strong)).toHaveLength(1);
   });
   it("ignores a search term that is too common to point anywhere", () => {
     const common = item({ id: "Q1-01", parentId: "1", requirement: "zzz", searchTerms: ["Member"] });
@@ -77,7 +93,7 @@ describe("buildChunks (Step 10)", () => {
       { policyId: "GG.1355", itemId: "Q1-01", address: "II.A", strength: "maybe" },
       { policyId: "GG.1422", itemId: "Q1-01", address: "II.A", strength: "maybe" },
     ];
-    const tight = { ...CFG, maxPolicyTokensPerCall: 18_000, longPolicyTokens: 40_000, maxChunksPerGroup: 2, keywordHitsPerItem: 0 };
+    const tight = { ...CFG, maxPolicyTokensPerCall: 18_000, longPolicyTokens: 40_000, keywordHitsPerItem: 0 };
     const c = collectCandidates([a], hits, policies, search, tight);
     const { chunks, skipped } = buildChunks([a], c, policies, search, tight);
     const read = chunks.flatMap((ch) => ch.policies.map((p) => p.policyId));
@@ -85,6 +101,32 @@ describe("buildChunks (Step 10)", () => {
     expect(read).toContain("GG.1550");
     expect(read).toContain("GG.1422"); // small enough to fit beside a required policy
     expect(skipped.map((s) => s.policyId)).toEqual(["GG.1355"]); // optional and too big for the room left
+  });
+
+  it("with no must-reads, the best weaker candidates share a single call", () => {
+    const a = item({ id: "Q1-01", parentId: "1", requirement: "a" });
+    const hits: ScreeningHit[] = ["GG.1503", "GG.1550", "GG.1355", "GG.1422"].map((policyId) => ({ policyId, itemId: "Q1-01", address: "II.A", strength: "maybe" as const }));
+    const tight = { ...CFG, maxPolicyTokensPerCall: 18_000, longPolicyTokens: 40_000, keywordHitsPerItem: 0 };
+    const c = collectCandidates([a], hits, policies, search, tight);
+    const { chunks, skipped } = buildChunks([a], c, policies, search, tight);
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0].policies.length + skipped.length).toBe(4);
+    expect(skipped.length).toBeGreaterThan(0);
+  });
+
+  it("never opens another call for a weaker candidate", () => {
+    const a = item({ id: "Q1-01", parentId: "1", requirement: "a" });
+    const hits: ScreeningHit[] = [
+      { policyId: "GG.1503", itemId: "Q1-01", address: "II.A", strength: "direct" },
+      { policyId: "GG.1550", itemId: "Q1-01", address: "II.A", strength: "maybe" },
+      { policyId: "GG.1355", itemId: "Q1-01", address: "II.A", strength: "maybe" },
+    ];
+    const tight = { ...CFG, maxPolicyTokensPerCall: 15_500, longPolicyTokens: 40_000, keywordHitsPerItem: 0 };
+    const c = collectCandidates([a], hits, policies, search, tight);
+    const { chunks, skipped } = buildChunks([a], c, policies, search, tight);
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0].policies.map((p) => p.policyId)).toEqual(["GG.1503"]);
+    expect(skipped.map((s) => s.policyId).sort()).toEqual(["GG.1355", "GG.1550"]);
   });
 
   it("returns no chunks for items nothing pointed to", () => {

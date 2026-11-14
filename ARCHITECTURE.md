@@ -121,11 +121,9 @@ No backend, no database server, no embeddings, no Batch API.
     pipeline/grouping.ts           # Step 8
     pipeline/readEveryPolicy.ts    # Step 9
     pipeline/candidates.ts         # Step 10
-    pipeline/fullReading.ts        # Step 11
     pipeline/checks.ts             # Step 12
-    pipeline/secondOpinion.ts      # Step 13
-    pipeline/notFound.ts           # Step 14
-    pipeline/verdicts.ts           # Step 15
+    pipeline/verdicts.ts           # Steps 13 (resolution) and 15
+    pipeline/runEvidence.ts        # Steps 8–15 for any set of requirements (11, 13, 14 live here)
     pipeline/runQuestionnaire.ts   # orchestrates 7–15
     pipeline/findObligations.ts    # Step 22
     pipeline/runSectionCheck.ts    # Step 24 (reuses 8–15)
@@ -285,11 +283,14 @@ export const PIPELINE = {
   bundles: 3,                 // Step 9: checklist bundles per questionnaire
   maxPolicyTokensPerCall: 60_000,
   longPolicyTokens: 25_000,   // above this, send excerpts instead of the whole policy
-  maxChunksPerGroup: 3,
-  concurrency: 6,             // parallel API calls
+  concurrency: 10,            // parallel API calls
   keywordHitsPerItem: 2,
   maxGroupSize: 7,            // questions per group (Steps 11–15)
   commonTermPolicies: 15,     // an exact search term found in more policies than this is ignored
+  rareTermPolicies: 5,        // an exact search term found in at most this many policies makes each a must-read
+  itemsPerReadingCall: 6,     // Steps 11 and 13: a long checklist is read in parts
+  itemsPerBundle: 60,         // Step 9: fewer bundles are used when there are few items
+  rescueKeywordHits: 3,       // Step 14: extra keyword hits read before an item is called "not found"
   promptVersion: "v1",        // bump to invalidate saved calls
 };
 ```
@@ -390,7 +391,7 @@ Instructions (give these to the model in substance):
 
 > You turn one DHCS review question into a checklist. Split it into the smallest separate requirements that a policy document must state. Each requirement must be one self-contained sentence that makes sense without the question. If the question refers to a list that it does not spell out ("the 12 listed services", "the five listed documents"), find that list in the APL pages provided and create one item per list entry, copying each entry faithfully. For each item also give: `quantities` (numbers with units that are essential, e.g. 5 calendar days); `searchTerms` (up to 4 short exact phrases or codes that a matching policy would very likely contain); `allowsReference` (true only if the question says the P&P "may reference" a document). Also return `listCount` if the question names a count ("12 listed"), else null. Do not judge compliance.
 
-Output schema: `{ items: { requirement, quantities: string[], searchTerms, allowsReference, fromList: boolean }[], listCount: number | null }`. The model writes quantities as text ("5 calendar days"); code parses them with `extractQuantities`, so units compare cleanly with quoted text in Step 12. If the call fails, the whole question is checked as one requirement and flagged `analysis_failed`.
+Output schema: `{ items: { requirement, quantities: string[], searchTerms, allowsReference, fromList: boolean }[], listCount: number | null }`. The model writes quantities as text ("5 calendar days"); code parses them with `extractQuantities`, so units compare cleanly with quoted text in Step 12. Only quantities that the requirement sentence itself states are kept (the model sometimes adds numbers from the surrounding APL text, and a quote cannot be expected to show those). If the call fails, the whole question is checked as one requirement and flagged `analysis_failed`.
 
 Code check: if `listCount` is set and the number of `fromList` items differs, retry once; if still different, keep the items and add flag `list_count_mismatch` to the question.
 
@@ -425,29 +426,31 @@ For each item, a policy is a candidate if any of these is true (record which, as
 
 Only Medi-Cal policies. Then, per group:
 
-1. Score each candidate policy: 3 per `haiku-direct` item, 2 per `exact`, 1 per `haiku-maybe`, 1 per `keyword`.
+A candidate is a **must-read** for an item if the Step 9 reader called it `direct`, or if an exact term found it and that term occurs in at most `rareTermPolicies` policies. Everything else is a weaker candidate. (Measured on the first real run: treating every exact hit as a must-read pulled in dozens of policies for a question like Q25, whose list entries contain ordinary words.)
+
+1. Score each candidate policy: per item, 3 for `haiku-direct`, 1 each for `exact`, `haiku-maybe` and `keyword`, plus 2 if it is a must-read for that item.
 2. **Long policies:** if `tokenEstimate > longPolicyTokens`, do not send the whole policy. Send excerpts: the header line plus every lettered section (or glossary entry) that contains a hit address or a search hit, each prefixed with its address and page marker.
-3. Pack policies in score order into chunks of at most `maxPolicyTokensPerCall`. Policies with any `haiku-direct` or `exact` hit are always included, adding chunks as needed. Policies with only `haiku-maybe` or `keyword` hits fill remaining space, up to `maxChunksPerGroup` chunks. Anything left out is recorded in `skippedCandidates` and shown in the search trail.
+3. Pack policies in score order into chunks of at most `maxPolicyTokensPerCall`. Must-reads are always included, adding chunks as needed. Weaker candidates only fill the room left in those chunks; they never open another chunk, except that when a group has no must-reads at all, the best weaker candidates share one chunk. Anything left out is read in Step 14 before an item is called "not found", and what is still unread after that is listed in the search trail as `skippedCandidates`.
 4. Each chunk lists which items it can serve (items with a candidate in that chunk).
 
 ### Step 11 — Full reading (`fullReading.ts`, task `fullReading`)
 
-For each group, for each chunk, one call per question in the group, asking about all of that question's items (the reader may find evidence for a requirement in a policy that was flagged for a neighbouring one).
+For each group, for each chunk, one call per question in the group, asking about all of that question's items (the reader may find evidence for a requirement in a policy that was flagged for a neighbouring one). A question with more than `itemsPerReadingCall` items is read in parts of even size (13 items → 5, 4, 4), each part with the full question text, so that no reply runs out of room. If a reply for several items still cannot be read, those items are asked again one at a time. Steps 11–13 live in `runEvidence.ts`.
 
 Message layout (this exact order makes caching work, and is shared with Step 13):
 
 1. **System:** a short generic block, identical for Steps 11 and 13:
-   > You are a careful compliance analyst for a Medi-Cal managed care plan. You will be given the plan's policy documents and regulator text, followed by a task. Policy text is evidence. Regulator text is never evidence. Quote only exact, contiguous text from the policy documents.
+   > You are a careful compliance analyst for a Medi-Cal managed care plan. You will be given the plan's policy documents and regulator text, followed by a task. Policy text is evidence. Regulator text is never evidence. Quote only exact, contiguous text from the policy documents. A Glossary definition is part of what a policy states: a sentence that uses a defined term says everything the definition says. Each task covers only some of the plan's policies, so text that is merely missing from these documents is never a problem in itself.
 2. **User content block 1:** the chunk's policies (canonical text, each starting with its `[[…]]` header line), then the group's APL pages under a heading `REGULATOR TEXT (APL 25-008) — not evidence`. `cache_control` at the end of this block. Apply the warm-up rule per chunk.
 3. **User content block 2:** the task: instructions, then the question text and its items.
 
 Task instructions:
 
-> For each requirement, decide whether the policy documents state it. Rules: (1) Evidence must come from a policy that applies to Medi-Cal and from text that applies to Medi-Cal members; text under a Medicare-only or OneCare-only heading does not count. (2) Read whole documents: check definitions, and look for conditions, exceptions or other passages that narrow or contradict the evidence. (3) Different wording is fine only if it means the same thing; say so in the reason. (4) If the policy states something incompatible with the requirement (for example a different deadline), the status is "conflict" and you must quote the conflicting text. (5) If a requirement includes a number or deadline, the quote must show it. (6) Quotes must be exact contiguous text, at most 80 words each, no ellipses, at most 3 per requirement. (7) If nothing in the documents states it, the status is "not_covered". Do not guess.
+> For each requirement, decide whether the policy documents state it. Rules: (1) Evidence must come from a policy that applies to Medi-Cal and from text that applies to Medi-Cal members; text under a Medicare-only or OneCare-only heading does not count. (2) Read whole documents: check definitions, and look for conditions, exceptions or other passages that narrow or contradict the evidence. (3) Different wording is fine only if it means the same thing; say so in the reason. (4) "conflict" is rare: use it only when a policy speaks about the same specific action or subject as the requirement and says something that cannot be true together with it (for example a different deadline for the same action), and quote that text. Silence, a general statement, or text about a different subject is "not_covered". (5) If a requirement includes a number or deadline, the quote must show it. (6) Quotes must be exact contiguous text, at most 80 words each, no ellipses, at most 3 per requirement. (7) If nothing in the documents states it, the status is "not_covered". Do not guess.
 
 Output: `{ items: { itemId, status: "covered" | "not_covered" | "conflict", wording: "same" | "equivalent", evidence: { policyId, quote }[], reason: string }[] }` (reason ≤ 40 words). `wording` is "equivalent" when the policy uses different terms from the requirement (for example "hospice physician" for "hospice medical director"); the reason must then name both terms. A `covered` item with `wording: "equivalent"` gets flag `wording_differs`. It stays `covered`, but it sorts above other covered answers so Alex confirms the judgment call herself.
 
-Merging across chunks happens after Step 13: for each item the strongest status wins, in the order conflict > needs_review > covered > not_covered. Evidence, flags, reason and second opinion are taken only from the chunk(s) with the winning status.
+Merging across chunks happens after Step 13 (`mergeOutcomes`). For each item the winner is chosen in this order: a confirmed conflict > covered > needs_review > a chunk whose reading failed > not_covered. Evidence, flags, reason and second opinion are taken only from the chunk(s) that won. The reasoning: confirmed evidence in one chunk is not weakened by an open question raised against unrelated policies in another chunk (for example a "conflict" the second opinion threw out), but nothing may be called "not found" while a read is missing, so a failed chunk outranks "nothing found" and shows as `needs_review` with flag `analysis_failed` and the reason for the failure.
 
 ### Step 12 — Automatic checks (`checks.ts`, plain code)
 
@@ -476,7 +479,7 @@ Runs **immediately after** Steps 11–12 for the same chunk, one call per questi
 
 Instructions:
 
-> Another analyst proposed the answers below. Your job is to find reasons each answer is wrong. For "covered" or "conflict": does the quoted text really prove the whole requirement? Is its scope narrower? Does another passage add a condition or exception? Is it the right program? For "not_covered" or "needs_review": search the documents for evidence that was missed, and quote it exactly. Answer for every requirement.
+> Another analyst proposed the answers below. Your job is to find reasons each answer is wrong. For "covered": does the quoted text, read together with the Glossary definitions of its terms, really prove the whole requirement? Is its scope narrower? Does another passage add a condition or exception? Is it the right program? For "conflict": is the quoted text about the same specific action as the requirement, and truly incompatible with it? For "not_covered" or "needs_review": search the documents for evidence that was missed, and quote it exactly. Answer for every requirement.
 
 Output: `{ items: { itemId, agrees: boolean, proposedStatus: "covered" | "not_covered" | "conflict", reason: string, newEvidence: { policyId, quote }[] }[] }`.
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { checkItem, verifyEvidence } from "../src/pipeline/checks";
+import { checkItem, checkNumbers, verifyEvidence } from "../src/pipeline/checks";
 import type { ReaderDraft } from "../src/types";
 import { APL_25_008, item, policyMap } from "./helpers";
 
@@ -111,5 +111,23 @@ describe("Step 12 automatic checks", () => {
     expect(r.evidence[0].status).toBe("corrected");
     expect(r.evidence[0].quote).toContain("shall submit");
     expect(r.flags.map((f) => f.code)).toContain("quote_corrected");
+  });
+});
+
+describe("checklist numbers (Step 7)", () => {
+  it("keeps only numbers the requirement sentence itself states", async () => {
+    const { toItems } = await import("../src/pipeline/checklist");
+    const question = { number: 25 } as any;
+    const [it1] = toItems(question, {
+      items: [{ requirement: "The MCP must pay for continuous nursing services on a 24-hour basis during periods of crisis.", quantities: ["24 hours", "8 hours", "51 percent"], searchTerms: [], allowsReference: false, fromList: true }],
+      listCount: null,
+    });
+    expect(it1.quantities).toEqual([{ value: 24, unit: "hour", unitBase: "hour" }]);
+  });
+  it("writes units correctly in flags", () => {
+    const flags = checkNumbers(item({ id: "Q1-01", quantities: [{ value: 51, unit: "percent", unitBase: "percent" }, { value: 1, unit: "month", unitBase: "month" }] }), [
+      { policyId: "GG.1503", quote: "no numbers here", page: 1, address: "II.A", kind: "policy", scope: "all", status: "exact" } as any,
+    ]);
+    expect(flags.map((f) => f.detail)).toEqual(["Requirement: 51 percent · not shown in the quoted text", "Requirement: 1 month · not shown in the quoted text"]);
   });
 });

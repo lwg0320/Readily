@@ -6,8 +6,8 @@ import type { LLM, UsageTracker } from "../llm/client";
 import { LLMError } from "../llm/client";
 import { documentsBlock, READING_SYSTEM, readerSchema, readerTask, reviewerSchema, reviewerTask, type ProposedAnswer } from "../llm/prompts/reading";
 import { estimateTokens } from "../lib/text";
-import type { Evidence, Flag, FoundBy, Item, ItemResult, ItemStatus, ParentResult, ReaderDraft, Regulator, ReviewDraft, SearchTrail } from "../types";
-import { buildChunks, collectCandidates, excerptPolicy, foundByLog, usableTerm, type CandidateMap, type ChunkPolicy } from "./candidates";
+import type { Evidence, Flag, Item, ItemResult, ItemStatus, ParentResult, ReaderDraft, Regulator, ReviewDraft, SearchTrail } from "../types";
+import { buildChunks, collectCandidates, excerptPolicy, foundByLog, usableTerm, type ChunkPolicy, type FoundByEntry } from "./candidates";
 import { checkItem, verifyEvidence, type CheckContext } from "./checks";
 import { bundleItems } from "./grouping";
 import type { Library } from "./library";
@@ -27,9 +27,15 @@ export type Parent = {
 
 export type Group = { parents: Parent[]; regulatorText: string };
 
+/** One set of policies that was read in full, and for which questions (or obligations). */
+export type DocumentSet = { parentIds: string[]; policies: { policyId: string; mode: "full" | "excerpt"; tokens: number }[]; tokens: number; lastLook: boolean };
+
 export type EvidenceRun = {
   results: ParentResult[];
-  foundBy: { itemId: string; policyId: string; foundBy: FoundBy[] }[];
+  foundBy: FoundByEntry[];
+  documentSets: DocumentSet[];
+  /** Weaker candidates that were never read in full, per group. */
+  leftOut: { parentIds: string[]; policyIds: string[] }[];
   stats: { items: number; bundles: number; policiesRead: number; screeningCalls: number; screeningHits: number; rescued: number; chunks: number };
 };
 
@@ -46,10 +52,32 @@ export type EvidenceArgs = {
   onGroupDone?: (results: ParentResult[]) => void;
 };
 
-/** What one item looks like after the full reading, checks and second opinion on one set of documents. */
-type Outcome = { status: ItemStatus; evidence: Evidence[]; flags: Flag[]; readerReason: string; reviewer: ItemResult["reviewer"] };
+/**
+ * What one item looks like after the full reading, checks and second opinion on one set of
+ * documents. `failed`: the reading of that set could not be completed.
+ */
+export type Outcome = { status: ItemStatus; evidence: Evidence[]; flags: Flag[]; readerReason: string; reviewer: ItemResult["reviewer"]; failed?: boolean };
 
-const STATUS_RANK: Record<ItemStatus, number> = { conflict: 3, needs_review: 2, covered: 1, not_covered: 0 };
+/**
+ * Which outcome wins when an item was checked against several sets of documents.
+ * A confirmed conflict beats everything. Confirmed evidence in one set beats an open question
+ * in another. A set that could not be read beats "nothing found", because nothing may be
+ * called "not found" while a read is missing.
+ */
+function rank(o: Outcome): number {
+  if (o.failed) return 1;
+  return { conflict: 4, covered: 3, needs_review: 2, not_covered: 0 }[o.status];
+}
+
+const why = (e: LLMError) => `Reason: ${e.message.replace(/[.\s]+$/, "")}.`;
+
+function split<T>(list: T[], maxSize: number): T[][] {
+  const parts = Math.ceil(list.length / maxSize);
+  const size = Math.ceil(list.length / parts);
+  const out: T[][] = [];
+  for (let i = 0; i < list.length; i += size) out.push(list.slice(i, i + size));
+  return out;
+}
 
 function dedupeFlags(flags: Flag[]): Flag[] {
   const seen = new Set<string>();
@@ -71,13 +99,14 @@ function dedupeEvidence(evidence: Evidence[]): Evidence[] {
   });
 }
 
-/** Combines the outcomes an item got from different sets of documents: the strongest status wins. */
+/** Combines the outcomes an item got from different sets of documents (see `rank`). */
 export function mergeOutcomes(outcomes: Outcome[]): Outcome {
   if (!outcomes.length) {
     return { status: "not_covered", evidence: [], flags: [], readerReason: "No policy was identified as possibly relevant.", reviewer: null };
   }
-  const top = Math.max(...outcomes.map((o) => STATUS_RANK[o.status]));
-  const winners = outcomes.filter((o) => STATUS_RANK[o.status] === top);
+  const top = Math.max(...outcomes.map(rank));
+  // among equals, the one that has something to show speaks first
+  const winners = outcomes.filter((o) => rank(o) === top).sort((a, b) => Number(b.evidence.length > 0) - Number(a.evidence.length > 0));
   return {
     status: winners[0].status,
     evidence: dedupeEvidence(winners.flatMap((o) => o.evidence)),
@@ -103,75 +132,110 @@ export async function runEvidence(args: EvidenceArgs): Promise<EvidenceRun> {
   const ctx: CheckContext = { policies: library.policies, regulator };
   const sameModel = models.fullReading === models.secondOpinion;
   let rescued = 0;
-  let chunkCount = 0;
   let groupsDone = 0;
 
+  const documentSets: DocumentSet[] = [];
+  const leftOut: EvidenceRun["leftOut"] = [];
+
+  type Unit = { parent: Parent; items: Item[] };
+
+  /**
+   * One call per unit, sharing a cached prefix. If a reply for several requirements cannot be
+   * read, those requirements are asked again one at a time.
+   */
+  async function callUnits<R extends { fromSavedCache: boolean }>(units: Unit[], thunk: (u: Unit) => () => Promise<R>, alreadyWarm: boolean): Promise<{ unit: Unit; result: R | LLMError }[]> {
+    const first = await llm.warmThenAll(units.map(thunk), { alreadyWarm });
+    const out: { unit: Unit; result: R | LLMError }[] = [];
+    const again: Unit[] = [];
+    units.forEach((unit, i) => {
+      const result = first[i];
+      if (result instanceof LLMError && result.kind === "invalid_output" && unit.items.length > 1) {
+        again.push(...unit.items.map((item) => ({ parent: unit.parent, items: [item] })));
+      } else out.push({ unit, result });
+    });
+    if (again.length) {
+      const second = await llm.warmThenAll(again.map(thunk), { alreadyWarm: true });
+      again.forEach((unit, i) => out.push({ unit, result: second[i] }));
+    }
+    return out;
+  }
+
   // Steps 11–13 on one set of documents, for the given items of each parent.
-  async function readAndReview(docs: ChunkPolicy[], group: Group, wanted: Map<string, Item[]>): Promise<Map<string, Outcome>> {
+  async function readAndReview(docs: ChunkPolicy[], group: Group, wanted: Map<string, Item[]>, lastLook = false): Promise<Map<string, Outcome>> {
     const out = new Map<string, Outcome>();
     const parents = group.parents.filter((p) => wanted.get(p.id)?.length);
     if (!parents.length || !docs.length) return out;
-    chunkCount++;
+    documentSets.push({
+      parentIds: parents.map((p) => p.id),
+      policies: docs.map((d) => ({ policyId: d.policyId, mode: d.mode, tokens: d.tokens })),
+      tokens: docs.reduce((n, d) => n + d.tokens, 0),
+      lastLook,
+    });
     const allowed = new Set(docs.map((d) => d.policyId));
     const localCtx: CheckContext = { ...ctx, policies: new Map([...ctx.policies].filter(([id]) => allowed.has(id))) };
     const prefix = { text: documentsBlock(docs, regulator.label, group.regulatorText), cache: true };
     const system = [{ text: READING_SYSTEM }];
+    // a long checklist is read in parts, so that no reply runs out of room
+    const units: Unit[] = parents.flatMap((parent) => split(wanted.get(parent.id)!, PIPELINE.itemsPerReadingCall).map((items) => ({ parent, items })));
 
     // Step 11 — full reading
-    const readings = await llm.warmThenAll(
-      parents.map((p) => () =>
-        llm.call({ task: "fullReading", model: models.fullReading, system, user: [prefix, { text: readerTask(p, wanted.get(p.id)!) }], schema: readerSchema, tracker, signal }),
-      ),
+    const readings = await callUnits(
+      units,
+      (u) => () => llm.call({ task: "fullReading", model: models.fullReading, system, user: [prefix, { text: readerTask(u.parent, u.items) }], schema: readerSchema, tracker, signal }),
+      false,
     );
 
     // Step 12 — automatic checks
-    const proposed = new Map<string, ProposedAnswer[]>();
+    const proposed = new Map<string, ProposedAnswer>();
     const reasons = new Map<string, string>();
-    parents.forEach((p, i) => {
-      const r = readings[i];
-      const items = wanted.get(p.id)!;
-      if (r instanceof LLMError) {
-        for (const item of items) {
-          out.set(item.id, { status: "needs_review", evidence: [], flags: [{ code: "analysis_failed", detail: "Could not be analysed — retry." }], readerReason: "", reviewer: null });
+    const reviewUnits: Unit[] = [];
+    for (const { unit, result } of readings) {
+      if (result instanceof LLMError) {
+        for (const item of unit.items) {
+          out.set(item.id, {
+            status: "needs_review",
+            evidence: [],
+            flags: [{ code: "analysis_failed", detail: `One set of policies could not be read for this requirement. ${why(result)} Run again to retry.` }],
+            readerReason: "",
+            reviewer: null,
+            failed: true,
+          });
         }
-        return;
+        continue;
       }
-      const drafts = new Map(r.data.items.map((d) => [d.itemId, d]));
-      const list: ProposedAnswer[] = [];
-      for (const item of items) {
+      const drafts = new Map(result.data.items.map((d) => [d.itemId, d]));
+      for (const item of unit.items) {
         const draft: ReaderDraft = drafts.get(item.id) ?? { itemId: item.id, status: "not_covered", wording: "same", evidence: [], reason: "" };
-        const checked = checkItem(item, draft, localCtx);
         reasons.set(item.id, draft.reason);
-        list.push({ item, ...checked });
+        proposed.set(item.id, { item, ...checkItem(item, draft, localCtx) });
       }
-      proposed.set(p.id, list);
-    });
+      reviewUnits.push(unit);
+    }
 
     // Step 13 — second opinion, right away so the cached documents are still live
-    const reviewable = parents.filter((p) => proposed.has(p.id));
-    const reviews = await llm.warmThenAll(
-      reviewable.map((p) => () =>
-        llm.call({ task: "secondOpinion", model: models.secondOpinion, system, user: [prefix, { text: reviewerTask(p, proposed.get(p.id)!) }], schema: reviewerSchema, tracker, signal }),
-      ),
-      { alreadyWarm: sameModel },
+    const reviews = await callUnits(
+      reviewUnits,
+      (u) => () =>
+        llm.call({ task: "secondOpinion", model: models.secondOpinion, system, user: [prefix, { text: reviewerTask(u.parent, u.items.map((i) => proposed.get(i.id)!)) }], schema: reviewerSchema, tracker, signal }),
+      sameModel,
     );
-    reviewable.forEach((p, i) => {
-      const r = reviews[i];
-      const byItem = r instanceof LLMError ? new Map<string, ReviewDraft>() : new Map(r.data.items.map((d) => [d.itemId, d as ReviewDraft]));
-      for (const answer of proposed.get(p.id)!) {
-        const review = byItem.get(answer.item.id) ?? null;
-        const fresh = review ? verifyEvidence(answer.item, review.newEvidence, localCtx) : { evidence: [], flags: [] };
+    for (const { unit, result } of reviews) {
+      const byItem = result instanceof LLMError ? new Map<string, ReviewDraft>() : new Map(result.data.items.map((d) => [d.itemId, d as ReviewDraft]));
+      for (const item of unit.items) {
+        const answer = proposed.get(item.id)!;
+        const review = byItem.get(item.id) ?? null;
+        const fresh = review ? verifyEvidence(item, review.newEvidence, localCtx) : { evidence: [], flags: [] };
         const resolved = resolveSecondOpinion({ status: answer.status, evidence: answer.evidence, flags: answer.flags }, review, fresh.evidence);
         let { status } = resolved;
         const flags = [...resolved.flags, ...(resolved.evidence.length > answer.evidence.length ? fresh.flags : [])];
         if (!review && status === "covered") {
           // "Covered" requires a second opinion that agrees. Without one, a person decides.
           status = "needs_review";
-          flags.push({ code: "analysis_failed", detail: "The second opinion could not be completed — retry." });
+          flags.push({ code: "analysis_failed", detail: `The second opinion could not be completed. ${result instanceof LLMError ? why(result) : "The reply left this requirement out."} Run again to retry.` });
         }
-        out.set(answer.item.id, { status, evidence: resolved.evidence, flags: dedupeFlags(flags), readerReason: reasons.get(answer.item.id) ?? "", reviewer: resolved.reviewer });
+        out.set(item.id, { status, evidence: resolved.evidence, flags: dedupeFlags(flags), readerReason: reasons.get(item.id) ?? "", reviewer: resolved.reviewer });
       }
-    });
+    }
     return out;
   }
 
@@ -187,7 +251,7 @@ export async function runEvidence(args: EvidenceArgs): Promise<EvidenceRun> {
     // Every question is asked against every set of documents for its group: the reader may find
     // evidence for a requirement in a policy that was flagged for a neighbouring one.
     const everything = itemsOf(new Set(items.map((i) => i.id)));
-    for (const chunk of chunks) record(await readAndReview(chunk.policies, group, everything));
+    (await Promise.all(chunks.map((chunk) => readAndReview(chunk.policies, group, everything)))).forEach(record);
 
     // Step 14 — before anything is called "not found"
     const unresolved = () => items.filter((i) => {
@@ -231,7 +295,7 @@ export async function runEvidence(args: EvidenceArgs): Promise<EvidenceRun> {
       }
       if (docs.length) {
         const before = open.length;
-        record(await readAndReview(docs, group, itemsOf(openIds)));
+        record(await readAndReview(docs, group, itemsOf(openIds), true));
         open = unresolved();
         rescued += before - open.length;
       }
@@ -253,6 +317,9 @@ export async function runEvidence(args: EvidenceArgs): Promise<EvidenceRun> {
       });
     }
 
+    const neverRead = [...new Set(skipped.map((s) => s.policyId))].filter((id) => !read.has(id));
+    if (neverRead.length) leftOut.push({ parentIds: group.parents.map((p) => p.id), policyIds: neverRead });
+
     // Step 15
     return group.parents.map((p) => {
       const results: ItemResult[] = p.items.map((item) => ({ item, ...mergeOutcomes(outcomes.get(item.id)!), trail: trails.get(item.id) }));
@@ -273,7 +340,9 @@ export async function runEvidence(args: EvidenceArgs): Promise<EvidenceRun> {
 
   return {
     results: perGroup.flat(),
-    foundBy: foundByLog(candidates as CandidateMap),
+    foundBy: foundByLog(candidates),
+    documentSets,
+    leftOut,
     stats: {
       items: allItems.length,
       bundles: bundles.length,
@@ -281,7 +350,7 @@ export async function runEvidence(args: EvidenceArgs): Promise<EvidenceRun> {
       screeningCalls,
       screeningHits: screening.hits.length,
       rescued,
-      chunks: chunkCount,
+      chunks: documentSets.length,
     },
   };
 }

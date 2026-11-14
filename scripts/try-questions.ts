@@ -6,7 +6,7 @@ import path from "node:path";
 import { MODELS, TASKS, type ModelKey } from "../src/config/models";
 import { createLLM, LLMError, UsageTracker } from "../src/llm/client";
 import { runQuestionnaire } from "../src/pipeline/runQuestionnaire";
-import { sortByRisk } from "../src/pipeline/verdicts";
+import { formatCitation, sortByRisk } from "../src/pipeline/verdicts";
 import type { ItemResult, Verdict } from "../src/types";
 import { REPO_ROOT, requireApiKey } from "./lib/env";
 import { fileCallStore } from "./lib/fileStore";
@@ -90,12 +90,16 @@ async function main() {
       console.log(`\n  ${MARK[it.status]} ${it.item.id}  [${it.status}]`);
       console.log(wrap(it.item.requirement, "      "));
       for (const e of it.evidence) {
-        console.log(`      ▸ ${e.policyId} §${e.address}, p.${e.page}${e.status === "corrected" ? " (quote corrected)" : ""}${it.status === "not_covered" ? " (disputed)" : ""}`);
+        console.log(`      ▸ ${formatCitation(e)}${e.status === "corrected" ? " (quote corrected)" : ""}${it.status === "not_covered" ? " (disputed)" : ""}`);
         console.log(wrap(`“${e.quote}”`, "        "));
       }
       if (it.readerReason) console.log(wrap(`reader: ${it.readerReason}`, "      "));
       if (it.reviewer) console.log(wrap(`second opinion: ${it.reviewer.agrees ? "agrees" : "DISAGREES"} — ${it.reviewer.reason}`, "      "));
-      for (const f of it.flags) console.log(wrap(`flag ${f.code}: ${f.detail}`, "      "));
+      for (const f of it.flags) {
+        // the reader's and the reviewer's reasons are already printed above
+        const repeated = f.detail === it.readerReason || f.detail === it.reviewer?.reason;
+        console.log(wrap(`flag ${f.code}${repeated ? "" : `: ${f.detail}`}`, "      "));
+      }
       if (it.trail) {
         const t = it.trail;
         const terms = t.exactTerms.map((x) => `“${x.term}”: ${x.hits} ${x.hits === 1 ? "policy" : "policies"}`).join(" · ");
@@ -105,7 +109,39 @@ async function main() {
     console.log();
   }
 
+  // How the policies were found and which were read in full: this is what to look at when a
+  // result is surprising.
   console.log("═".repeat(100));
+  console.log("How the policies were found (direct / maybe = the Step 9 reader · exact = exact search · keyword = keyword search)\n");
+  const parentOf = new Map(run.checklists.flatMap((c) => c.items.map((i) => [i.id, String(c.question.number)] as const)));
+  for (const q of questions) {
+    const id = String(q.number);
+    const perPolicy = new Map<string, { direct: number; maybe: number; exact: number; keyword: number; strong: boolean }>();
+    for (const f of run.foundBy) {
+      if (parentOf.get(f.itemId) !== id) continue;
+      const row = perPolicy.get(f.policyId) ?? { direct: 0, maybe: 0, exact: 0, keyword: 0, strong: false };
+      if (f.foundBy.includes("haiku-direct")) row.direct++;
+      if (f.foundBy.includes("haiku-maybe")) row.maybe++;
+      if (f.foundBy.includes("exact")) row.exact++;
+      if (f.foundBy.includes("keyword")) row.keyword++;
+      row.strong ||= f.strong;
+      perPolicy.set(f.policyId, row);
+    }
+    const rows = [...perPolicy].sort((a, b) => Number(b[1].strong) - Number(a[1].strong) || b[1].direct - a[1].direct || a[0].localeCompare(b[0]));
+    const tag = ([pid, r]: (typeof rows)[number]) =>
+      `${pid}(${[r.direct && `direct×${r.direct}`, r.maybe && `maybe×${r.maybe}`, r.exact && `exact×${r.exact}`, r.keyword && `keyword×${r.keyword}`].filter(Boolean).join(" ")})`;
+    const items = run.checklists.find((c) => c.question.number === q.number)?.items.length ?? 0;
+    console.log(`Q${id}: ${items} checks · ${rows.length} policies pointed to, ${rows.filter((r) => r[1].strong).length} of them must-reads`);
+    console.log(wrap(`must-read: ${rows.filter((r) => r[1].strong).map(tag).join(", ") || "none"}`, "    "));
+    console.log(wrap(`weaker: ${rows.filter((r) => !r[1].strong).map(tag).join(", ") || "none"}`, "    "));
+  }
+  console.log();
+  run.documentSets.forEach((d, i) => {
+    console.log(wrap(`Set ${i + 1}${d.lastLook ? " (last look)" : ""} · Q${d.parentIds.join(", Q")} · about ${Math.round(d.tokens / 1000)}k tokens: ${d.policies.map((p) => `${p.policyId}${p.mode === "excerpt" ? " (excerpts)" : ""}`).join(", ")}`, "  "));
+  });
+  for (const l of run.leftOut) console.log(wrap(`Not read in full for Q${l.parentIds.join(", Q")} (weaker candidates that did not fit): ${l.policyIds.join(", ")}`, "  "));
+
+  console.log("\n" + "═".repeat(100));
   const counts = run.results.reduce<Record<string, number>>((a, r) => ((a[r.verdict] = (a[r.verdict] ?? 0) + 1), a), {});
   console.log(`Verdicts: ${Object.entries(counts).map(([v, n]) => `${VERDICT[v as Verdict]} ${n}`).join(" · ")}`);
   console.log(`Checks: ${run.stats.items} from ${questions.length} question(s) · bundles: ${run.stats.bundles} · policies read per bundle: ${run.stats.policiesRead} · flagged by the reader: ${run.stats.screeningHits} · document sets read in full: ${run.stats.chunks} · rescued by the last look: ${run.stats.rescued}`);
@@ -119,7 +155,7 @@ async function main() {
   const dir = path.join(REPO_ROOT, ".cache", "runs");
   fs.mkdirSync(dir, { recursive: true });
   const file = path.join(dir, `try-${questions.map((q) => q.number).join("-").slice(0, 40)}.json`);
-  fs.writeFileSync(file, JSON.stringify({ models, results: run.results, checklists: run.checklists, foundBy: run.foundBy, stats: run.stats, usage: tracker.byTask, seconds }, null, 1));
+  fs.writeFileSync(file, JSON.stringify({ models, results: run.results, checklists: run.checklists, foundBy: run.foundBy, documentSets: run.documentSets, leftOut: run.leftOut, stats: run.stats, usage: tracker.byTask, seconds }, null, 1));
   console.log(`\nFull results saved to ${path.relative(REPO_ROOT, file)}`);
 }
 

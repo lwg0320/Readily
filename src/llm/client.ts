@@ -301,6 +301,7 @@ export function createLLM(deps: LLMDeps) {
         }
         if (raw?.stop_reason === "max_tokens") {
           // ran out of room (thinking counts toward the limit): try once more with twice the room
+          lastProblem = `the reply was cut off at the ${maxTokens}-token limit`;
           maxTokens *= 2;
         } else {
           messages.push({ role: "assistant", content: [{ type: "text", text: text || "(empty reply)" }] });
