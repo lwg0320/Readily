@@ -1,5 +1,5 @@
 // Small shared pieces: icons, chips, buttons.
-import { useState, type ButtonHTMLAttributes, type ReactNode } from "react";
+import { useRef, useState, type ButtonHTMLAttributes, type ReactNode } from "react";
 import type { ItemStatus, Verdict } from "../types";
 import { STATUS_LABEL, VERDICT_LABEL, VERDICT_MEANING, VERDICT_ORDER } from "./labels";
 
@@ -90,18 +90,27 @@ export function VerdictChip({ verdict, count, size = "md" }: { verdict: Verdict;
  * a tap, shows what each verdict means and what to do with it.
  */
 export function VerdictInfo() {
-  // open towards wherever there is room: a run near the bottom of the window opens upwards
-  const [place, setPlace] = useState({ up: false, right: false });
-  const measure = (e: { currentTarget: HTMLElement }) => {
+  // Placed in window coordinates so that it is never cut off by a scrolling area or the window
+  // edge: below the button when there is room, otherwise above, otherwise as high as it fits.
+  const tip = useRef<HTMLDivElement>(null);
+  const [at, setAt] = useState({ left: 0, top: 0 });
+  const place = (e: { currentTarget: HTMLElement }) => {
     const r = e.currentTarget.getBoundingClientRect();
-    setPlace({ up: window.innerHeight - r.bottom < 430 && r.top > 430, right: r.left + 450 > window.innerWidth });
+    const w = tip.current?.offsetWidth ?? 432;
+    const h = tip.current?.offsetHeight ?? 500;
+    const edge = 12;
+    const left = Math.max(edge, Math.min(r.left, window.innerWidth - w - edge));
+    const below = r.bottom + 6;
+    const above = r.top - 6 - h;
+    const top = below + h + edge <= window.innerHeight ? below : above >= edge ? above : Math.max(edge, window.innerHeight - h - edge);
+    setAt({ left, top });
   };
   return (
-    <div className="info relative inline-flex" onMouseEnter={measure} onFocus={measure}>
+    <div className="info inline-flex" onMouseEnter={place} onFocus={place}>
       <button type="button" aria-label="What the verdicts mean" className="flex h-6 w-6 items-center justify-center rounded-full text-ink-soft hover:bg-rule-soft hover:text-ink">
         <Icon name="info" />
       </button>
-      <div role="tooltip" className={`info-tip absolute z-50 w-[27rem] max-w-[calc(100vw-3rem)] ${place.up ? "bottom-full pb-1.5" : "top-full pt-1.5"} ${place.right ? "right-0" : "left-0"}`}>
+      <div ref={tip} role="tooltip" style={at} className="info-tip fixed z-50 w-[27rem] max-w-[calc(100vw-1.5rem)]">
         <dl className="space-y-3 rounded-md border border-rule bg-paper p-4 text-left text-[13.5px] font-normal leading-snug text-ink shadow-lg">
           {VERDICT_ORDER.map((v) => (
             <div key={v}>
