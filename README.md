@@ -47,7 +47,7 @@ This makes five small real calls (well under one cent) and checks the key, the r
 
 You only need this if the source documents change. The generated data is already committed.
 
-Prerequisites: Node 20+ and Poppler (`brew install poppler` on macOS).
+Prerequisites: Node 20.19 or newer (22+ recommended) and Poppler (`brew install poppler` on macOS).
 
 1. Copy the `Readily` folder (with `Public Policies/`, `APL/`, `Regulatory Questionnaire.pdf`, `ECM Policy Guidelines.pdf`) to `source/Readily/`. This folder is git-ignored.
 2. `npm install`
