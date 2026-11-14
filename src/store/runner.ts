@@ -113,8 +113,9 @@ export const useRunner = create<RunnerState>((set, get) => ({
     const tracker = new UsageTracker();
     const current = () => useRuns.getState().runs[base.id] ?? base;
     // what this session has spent is added to what earlier sessions of the same run spent
+    const startedAt = Date.now();
     const save = (patch: Partial<Run>) =>
-      useRuns.getState().put({ ...current(), ...patch, cost: base.cost + tracker.totalCost, usageByTask: mergeUsage(base.usageByTask, tracker.byTask), updatedAt: Date.now() });
+      useRuns.getState().put({ ...current(), ...patch, cost: base.cost + tracker.totalCost, activeMs: (base.activeMs ?? 0) + (Date.now() - startedAt), usageByTask: mergeUsage(base.usageByTask, tracker.byTask), updatedAt: Date.now() });
 
     let lastCostSave = 0;
     let lastThrottle = 0;

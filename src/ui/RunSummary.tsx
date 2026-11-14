@@ -28,4 +28,8 @@ export const accuracyText = (run: Pick<Run, "models">) => {
   return fullReading === secondOpinion ? `${MODELS[fullReading].label} accuracy` : `${MODELS[fullReading].label} reading, ${MODELS[secondOpinion].label.toLowerCase()} second opinion`;
 };
 
-export const costText = (run: Run) => (run.cost > 0 ? `${formatCost(run.cost)} spent` : "no cost");
+export const costText = (run: Run) => {
+  const cost = run.cost > 0 ? `${formatCost(run.cost)} spent` : "no cost";
+  const minutes = run.activeMs ? Math.max(1, Math.round(run.activeMs / 60_000)) : 0;
+  return minutes ? `${cost}, ${minutes} ${minutes === 1 ? "minute" : "minutes"} of running` : cost;
+};

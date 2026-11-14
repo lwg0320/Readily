@@ -6,7 +6,7 @@ import { fillForm, type FormAnswer } from "../export/fillForm";
 import { sortByRisk } from "../pipeline/verdicts";
 import { loadQuestionnaire, pdfUrl, useCatalog } from "../store/catalog";
 import { useRunner } from "../store/runner";
-import { currentAnswer, failedCount, useRuns } from "../store/runs";
+import { currentAnswer, failedCount, outdatedPolicies, useRuns } from "../store/runs";
 import { useSettings } from "../store/settings";
 import type { ParentResult, Verdict } from "../types";
 import { Bar, Button, Icon, VerdictChip } from "./bits";
@@ -60,6 +60,7 @@ export function Results() {
   const waiting = isActive && shown ? run.results.filter((r) => !shown.has(r.parentId)).length : 0;
   const approved = run.results.filter((r) => r.approved).length;
   const failed = failedCount(run);
+  const outdated = outdatedPolicies(run);
   const meta = catalog.questionnaires.find((q) => q.id === run.sourceId);
   const text = new Map(questionnaire?.questions.map((q) => [String(q.number), q.text]));
 
@@ -143,6 +144,23 @@ export function Results() {
               {hasKey && !active && <Button onClick={() => start(run.sourceId, run.id)}>Retry these</Button>}
             </>
           )}
+        </div>
+      )}
+
+      {outdated.length > 0 && (
+        <div className="mt-4 flex gap-2.5 rounded-md bg-review-wash px-4 py-3 text-[14px] text-review">
+          <Icon name="clock" className="mt-0.5" />
+          <div>
+            <p className="font-semibold">{outdated.length === 1 ? "A policy these answers rest on may be out of date" : "Policies these answers rest on may be out of date"}</p>
+            <ul className="mt-0.5">
+              {outdated.slice(0, 4).map((p) => (
+                <li key={p.policyId}>
+                  <span className="font-semibold">{p.policyId}</span> (cited in {p.answers} {p.answers === 1 ? "answer" : "answers"}) {p.notes.join(", and ")}.
+                </li>
+              ))}
+              {outdated.length > 4 && <li>And {outdated.length - 4} more, shown on the questions that cite them.</li>}
+            </ul>
+          </div>
         </div>
       )}
 

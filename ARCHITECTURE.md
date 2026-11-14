@@ -674,6 +674,8 @@ Language in the UI is plain: "policies", "checks", "second opinion". No model ja
 - Summary bar: "64 questions · Conflict a · Needs review b · Partial c · Not found d · Covered e · Read all 251 Medi-Cal policies · Standard / Standard · $0.94".
 - Filter chips per verdict. Default sort is riskiest first.
 - Row: question number, first ~120 characters of the question, verdict chip, top citation, small flag chips (labels: `wording_differs` → "wording differs", `number_mismatch` → "numbers differ", `number_not_shown` → "number not shown", `reviewer_disputed` → "second opinion disagreed" (with "upheld by tie-break" when the item is still covered or conflict), `reviewer_found_evidence` → "second opinion found evidence", `conflict_unconfirmed` → "conflict not confirmed", `policies_disagree` → "policies may disagree", `policy_predates_apl` / `cites_superseded_apl` → "policy may be outdated", `quote_corrected` → "quote corrected", `wrong_program_removed` → "non-Medi-Cal text removed", `list_count_mismatch` → "list may be incomplete").
+- "Wording differs" and "policy may be outdated" are not shown on rows: on the first real run they applied to most rows and made every row look alike. They stay on the question's own page, and outdated policies are summarised once above the list ("GG.1503 (cited in 34 answers) was last revised 2024-09-01, before APL 25-008 …").
+- The summary line also says how long the run took.
 - Progress: "n of 64 approved". Buttons: **Fill DHCS form**, **Download CSV**.
 - If another run exists for the same questionnaire: **Show differences** lists questions whose verdict differs between the two runs, side by side.
 - Re-run button reflecting the current toggles, with its estimate.

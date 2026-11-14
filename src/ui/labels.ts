@@ -42,7 +42,12 @@ export const FLAG_LABEL: Record<FlagCode, string> = {
   analysis_failed: "could not be analysed",
 };
 
-/** Flags worth showing on a results row, most important first, without repeats. */
+/**
+ * Flags worth showing on a results row, most important first, without repeats.
+ * "Wording differs" and "policy may be outdated" are left to the question's own page: on a real
+ * run they applied to most rows, which made every row look the same. Outdated policies are
+ * summarised once, above the list.
+ */
 export function rowFlags(codes: FlagCode[]): string[] {
   const order: FlagCode[] = [
     "analysis_failed",
@@ -52,12 +57,9 @@ export function rowFlags(codes: FlagCode[]): string[] {
     "reviewer_disputed",
     "reviewer_found_evidence",
     "number_not_shown",
-    "wording_differs",
     "list_count_mismatch",
     "wrong_program_removed",
     "quote_corrected",
-    "policy_predates_apl",
-    "cites_superseded_apl",
   ];
   const have = new Set(codes);
   return [...new Set(order.filter((c) => have.has(c)).map((c) => FLAG_LABEL[c]))];

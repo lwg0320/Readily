@@ -20,6 +20,8 @@ export type Run = {
   checkCount: number | null;
   policiesRead: number;
   cost: number;
+  /** Time spent running, added up over every session of this run. Absent on runs saved before this was recorded. */
+  activeMs?: number;
   usageByTask: Partial<Record<TaskKey, TaskUsage>>;
   results: ParentResult[];
 };
@@ -86,6 +88,25 @@ export const useRuns = create<RunsState>((set, get) => ({
 /** The answer and citation that would go on the form: Alex's edit if there is one, else the suggestion. */
 export function currentAnswer(r: ParentResult): { answer: "yes" | "no" | null; citation: string } {
   return r.edited ?? { answer: r.suggestedAnswer, citation: r.suggestedCitation };
+}
+
+/** Policies an answer rests on that may be out of date, with how many answers cite each. */
+export function outdatedPolicies(run: Run): { policyId: string; answers: number; notes: string[] }[] {
+  const byPolicy = new Map<string, { answers: Set<string>; notes: Set<string> }>();
+  for (const r of run.results) {
+    for (const i of r.items) {
+      if (i.status === "not_covered") continue;
+      for (const f of i.flags) {
+        if (f.code !== "policy_predates_apl" && f.code !== "cites_superseded_apl") continue;
+        const policyId = f.detail.split(" ")[0];
+        let p = byPolicy.get(policyId);
+        if (!p) byPolicy.set(policyId, (p = { answers: new Set(), notes: new Set() }));
+        p.answers.add(r.parentId);
+        p.notes.add(f.detail.slice(policyId.length + 1));
+      }
+    }
+  }
+  return [...byPolicy].map(([policyId, p]) => ({ policyId, answers: p.answers.size, notes: [...p.notes] })).sort((a, b) => b.answers - a.answers || a.policyId.localeCompare(b.policyId));
 }
 
 /** Checks that could not be analysed and can be retried. */
