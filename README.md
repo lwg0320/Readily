@@ -14,7 +14,7 @@ The full design is in [ARCHITECTURE.md](ARCHITECTURE.md).
 | 1 | Document preparation (`npm run prep`) | Done |
 | 2 | Shared code and unit tests (`npm test`) | Done |
 | 3 | API client (`npm run check:key`) | Done |
-| 4 | Questionnaire pipeline | Not started |
+| 4 | Questionnaire pipeline (`npm run try -- 10 11 25`) | Built; being checked against the real API |
 | 5 | Questionnaire screens and form export | Not started |
 | 6–8 | Policy Guide, accuracy toggles, replay, accuracy page | Not started |
 
@@ -42,6 +42,18 @@ The full design is in [ARCHITECTURE.md](ARCHITECTURE.md).
 3. `npm run check:key`
 
 This makes five small real calls (well under one cent) and checks the key, the request format, JSON output, the saved-call store and prompt caching. Every line should say PASS.
+
+## Trying the pipeline on a few questions
+
+With `.env.local` in place:
+
+```
+npm run try -- 10 11 25
+```
+
+This runs the real pipeline on those questions: it turns them into checks, reads all 251 Medi-Cal policies, reads the candidates in full, gets a second opinion and prints each verdict with its quotes, flags and cost. Expect two to four minutes and about $0.30–0.50. Finished calls are saved under `.cache/`, so running the same questions again is instant and free.
+
+Options: `--all` (whole questionnaire, about $1.30), `--reading=opus`, `--review=opus`, `--fresh` (ignore saved calls).
 
 ## Running the document preparation
 

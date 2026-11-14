@@ -390,14 +390,14 @@ Instructions (give these to the model in substance):
 
 > You turn one DHCS review question into a checklist. Split it into the smallest separate requirements that a policy document must state. Each requirement must be one self-contained sentence that makes sense without the question. If the question refers to a list that it does not spell out ("the 12 listed services", "the five listed documents"), find that list in the APL pages provided and create one item per list entry, copying each entry faithfully. For each item also give: `quantities` (numbers with units that are essential, e.g. 5 calendar days); `searchTerms` (up to 4 short exact phrases or codes that a matching policy would very likely contain); `allowsReference` (true only if the question says the P&P "may reference" a document). Also return `listCount` if the question names a count ("12 listed"), else null. Do not judge compliance.
 
-Output schema: `{ items: { requirement, quantities, searchTerms, allowsReference, fromList: boolean }[], listCount: number | null }`.
+Output schema: `{ items: { requirement, quantities: string[], searchTerms, allowsReference, fromList: boolean }[], listCount: number | null }`. The model writes quantities as text ("5 calendar days"); code parses them with `extractQuantities`, so units compare cleanly with quoted text in Step 12. If the call fails, the whole question is checked as one requirement and flagged `analysis_failed`.
 
 Code check: if `listCount` is set and the number of `fromList` items differs, retry once; if still different, keep the items and add flag `list_count_mismatch` to the question.
 
 ### Step 8 — Grouping (`grouping.ts`, plain code)
 
 - **Groups** (used by Steps 11–15): walk questions in order and start a new group when adding the next question would exceed 7 questions, or when its first APL page is more than 1 page past the group's first APL page. Expect about 10 groups.
-- **Bundles** (used by Step 9): split the ordered item list into `PIPELINE.bundles` contiguous parts of roughly equal item count, never splitting a question across bundles.
+- **Bundles** (used by Step 9): split the ordered item list into contiguous parts of roughly equal item count, never splitting a question across bundles. The number of bundles is `ceil(items / itemsPerBundle)`, at most `PIPELINE.bundles` (so three questions use one bundle; the full questionnaire uses three).
 - For a Guide section check there is one group and one bundle.
 
 ### Step 9 — Read every Medi-Cal policy (`readEveryPolicy.ts`, task `readEveryPolicy`)
@@ -432,7 +432,7 @@ Only Medi-Cal policies. Then, per group:
 
 ### Step 11 — Full reading (`fullReading.ts`, task `fullReading`)
 
-For each group, for each chunk, one call per question that has at least one item served by that chunk.
+For each group, for each chunk, one call per question in the group, asking about all of that question's items (the reader may find evidence for a requirement in a policy that was flagged for a neighbouring one).
 
 Message layout (this exact order makes caching work, and is shared with Step 13):
 
@@ -447,7 +447,7 @@ Task instructions:
 
 Output: `{ items: { itemId, status: "covered" | "not_covered" | "conflict", wording: "same" | "equivalent", evidence: { policyId, quote }[], reason: string }[] }` (reason ≤ 40 words). `wording` is "equivalent" when the policy uses different terms from the requirement (for example "hospice physician" for "hospice medical director"); the reason must then name both terms. A `covered` item with `wording: "equivalent"` gets flag `wording_differs`. It stays `covered`, but it sorts above other covered answers so Alex confirms the judgment call herself.
 
-Merging across chunks: for each item keep the best status in the order conflict > covered > not_covered, and pool the evidence.
+Merging across chunks happens after Step 13: for each item the strongest status wins, in the order conflict > needs_review > covered > not_covered. Evidence, flags, reason and second opinion are taken only from the chunk(s) with the winning status.
 
 ### Step 12 — Automatic checks (`checks.ts`, plain code)
 
@@ -480,7 +480,7 @@ Instructions:
 
 Output: `{ items: { itemId, agrees: boolean, proposedStatus: "covered" | "not_covered" | "conflict", reason: string, newEvidence: { policyId, quote }[] }[] }`.
 
-Resolution (plain code). First run `newEvidence` through Step 12's checks 1–2.
+Resolution (plain code). First run `newEvidence` through Step 12's checks 1–2. If the second-opinion call fails or skips an item, a `covered` becomes `needs_review` with flag `analysis_failed`, because Covered requires a second opinion that agrees. If both toggles use the same model, Step 13 skips the cache warm-up (Step 11 already wrote the cache).
 
 | Reader status (after checks) | Reviewer | Result |
 |---|---|---|
@@ -498,7 +498,7 @@ Resolution (plain code). First run `newEvidence` through Step 12's checks 1–2.
 For every item that is `not_covered` with no evidence:
 
 1. Check that Step 9 completed for all 251 policies for the item's bundle. Re-run any missing calls.
-2. Run `exactSearch` for each search term and `keywordSearch(requirement, 5)`. If this finds a Medi-Cal policy that was not sent to Step 11 for this item, run Steps 11–13 once more for that item with those policies (one extra chunk). Record `rescued: true` if the status changes.
+2. Take one more look, once per group: collect, for the group's still-open items, any policy flagged by a re-run read, any candidate left out in Step 10, and the top `rescueKeywordHits` (3) keyword hits, excluding policies already read for the group. Pack the most-pointed-to ones into one extra chunk and run Steps 11–13 again for the open items only. Count an item as rescued if it is no longer open.
 3. Otherwise attach the trail:
 
 ```ts
@@ -536,6 +536,10 @@ Per question or obligation, from its item statuses:
 6. Save the run (§9.2).
 
 A run can be cancelled. Because every call is in the saved-call cache, starting it again resumes where it stopped at no cost.
+
+Steps 8–15 live in one function, `runEvidence`, that takes groups of "parents" (a question or an obligation, each with its items) and regulator text. `runQuestionnaire` adds Step 7 in front of it; the Guide check (Step 24) calls it directly.
+
+**Trying it from the terminal:** `npm run try -- 10 11 25` runs the real pipeline on those questions with the key in `.env.local`, prints each verdict with its quotes, flags, second opinion, search trail and cost, and saves finished calls under `.cache/calls` so a repeat is free. `--all` runs the whole questionnaire; `--reading=opus --review=opus` switch models. This replaces the dev button planned for phase 4.
 
 ### Step 22 — Find obligations (`findObligations.ts`, task `findObligations`)
 

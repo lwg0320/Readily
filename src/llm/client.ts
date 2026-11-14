@@ -320,7 +320,10 @@ export function createLLM(deps: LLMDeps) {
    * has arrived, so the first live call goes alone and the rest follow in parallel.
    * Results come back in the order given; a failed call yields its error instead of throwing.
    */
-  async function warmThenAll<R extends { fromSavedCache: boolean }>(thunks: (() => Promise<R>)[]): Promise<(R | LLMError)[]> {
+  async function warmThenAll<R extends { fromSavedCache: boolean }>(
+    thunks: (() => Promise<R>)[],
+    opts: { alreadyWarm?: boolean } = {},
+  ): Promise<(R | LLMError)[]> {
     const results: (R | LLMError)[] = new Array(thunks.length);
     const run = async (i: number): Promise<R | LLMError> => {
       try {
@@ -333,7 +336,8 @@ export function createLLM(deps: LLMDeps) {
       }
     };
     let i = 0;
-    for (; i < thunks.length; i++) {
+    // `alreadyWarm`: an earlier step just wrote this prefix to the cache, so nothing needs to go first
+    for (; !opts.alreadyWarm && i < thunks.length; i++) {
       const r = await run(i);
       if (!(r instanceof LLMError) && !r.fromSavedCache) {
         i++;

@@ -9,5 +9,7 @@ export const PIPELINE = {
   keywordHitsPerItem: 2,
   maxGroupSize: 7, // questions per group (Steps 11–15)
   commonTermPolicies: 15, // an exact search term found in more policies than this is too common to use
+  itemsPerBundle: 60, // Step 9: fewer bundles are used when there are few items
+  rescueKeywordHits: 3, // Step 14: extra keyword hits read before an item is called "not found"
   promptVersion: "v1", // bump to invalidate saved calls
 };
