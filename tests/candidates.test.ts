@@ -77,7 +77,7 @@ describe("buildChunks (Step 10)", () => {
       { policyId: "GG.1355", itemId: "Q1-01", address: "II.A", strength: "maybe" },
       { policyId: "GG.1422", itemId: "Q1-01", address: "II.A", strength: "maybe" },
     ];
-    const tight = { ...CFG, maxPolicyTokensPerCall: 12_000, maxChunksPerGroup: 2, keywordHitsPerItem: 0 };
+    const tight = { ...CFG, maxPolicyTokensPerCall: 18_000, longPolicyTokens: 40_000, maxChunksPerGroup: 2, keywordHitsPerItem: 0 };
     const c = collectCandidates([a], hits, policies, search, tight);
     const { chunks, skipped } = buildChunks([a], c, policies, search, tight);
     const read = chunks.flatMap((ch) => ch.policies.map((p) => p.policyId));

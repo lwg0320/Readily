@@ -42,7 +42,7 @@ The source folder is `Readily/`. Copy it to `source/Readily/` in the repo. Ignor
 - Below that the outline is `A.` → `1.` → `a.` → `i.`, shown by indentation.
 - 366 policies have a glossary laid out as a two-column table with a `Term   Definition` header row. Term names often wrap over several lines in the left column.
 - Page footers look like `Page 2 of 18   GG.1503: <title>   Revised Date: 09/01/2024`, sometimes followed by a second line continuing the title.
-- Policies are small. Measured on the prepared text with the app's estimate (characters ÷ 4): the 251 Medi-Cal policies total ≈ 1.46M tokens, average ≈ 5.8k, largest AA.1000 ≈ 62k, and only two exceed 25k (AA.1000, GG.1600). Real token counts are likely somewhat lower.
+- Policies are small. Token counts use the app's estimate, characters ÷ 2.9, calibrated against the API (GG.1503: 42,922 characters = 14,999 tokens). The 251 Medi-Cal policies total ≈ 2.0M tokens, average ≈ 8k, largest AA.1000 ≈ 86k (still under Haiku's 100k price step), and three exceed 25k (AA.1000, GG.1600, GG.1355).
 
 **Known traps (use these as test cases)**
 
@@ -191,7 +191,7 @@ Authorized Representative: Medi-Cal: Any individual appointed…
 - `admin` sections are **omitted** from canonical text. `references` is kept.
 - `<<page N>>` markers appear on their own lines at each page start.
 - Store `canonicalText`, and an `offsets` array mapping character ranges → `{ page, address, kind, scope }`.
-- Store `tokenEstimate = ceil(canonicalText.length / 4)`.
+- Store `tokenEstimate = estimateTokens(canonicalText)` (§7.1).
 
 **Output shape**
 
@@ -305,7 +305,7 @@ The UI toggles override `fullReading.model` and `secondOpinion.model` for the ne
 - `normalize(s)`: remove `<<page N>>` markers; replace curly quotes and dashes with plain ones; join words hyphenated across line breaks; collapse all whitespace to single spaces; lower-case. Also return a map from normalized offsets back to original offsets.
 - `normalizeNumbers(s)`: turn `five (5)` and `five` into `5` for number words one–ninety-nine and `hundred`; `percent` and `%` → `percent`.
 - `extractQuantities(s)`: after `normalizeNumbers`, find `<number> <unit>` where unit ∈ calendar day(s), business day(s), working day(s), day(s), hour(s), month(s), year(s), percent, visit(s). Return `{ value, unit, unitBase }` where `unitBase` ∈ day, hour, month, year, percent, visit.
-- `estimateTokens(s) = ceil(s.length / 4)`.
+- `estimateTokens(s) = ceil(s.length / 2.9)` (measured, see §2).
 
 ### 7.2 Quote verification (`lib/quotes.ts`)
 
@@ -722,7 +722,7 @@ Build in this order. Do not start a phase until the previous one passes.
 7. **Toggles, estimates, differences view, demo export/replay.**
 8. **Accuracy page.**
 
-Expected cost of one full questionnaire run on defaults: about $1. A full run of the three demo Guide sections: about $0.50.
+Expected cost of one full questionnaire run on defaults: about $1.30 (reading every policy is about $0.80 of that, now that real token counts are known). A full run of the three demo Guide sections: about $0.80.
 
 ---
 

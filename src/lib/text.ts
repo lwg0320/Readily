@@ -167,6 +167,10 @@ export function extractQuantities(s: string): Quantity[] {
   return out;
 }
 
+/**
+ * Rough token count for sizing calls. Measured against the API on a real policy (GG.1503:
+ * 42,922 characters = 14,999 tokens), dense policy text runs at about 2.9 characters per token.
+ */
 export function estimateTokens(s: string): number {
-  return Math.ceil(s.length / 4);
+  return Math.ceil(s.length / 2.9);
 }

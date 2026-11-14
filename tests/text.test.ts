@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { loadPolicy } from "./helpers";
 import { estimateTokens, extractQuantities, normalize, normalizeNumbers, normalizeWithMap, searchableWithMap } from "../src/lib/text";
 
 describe("normalizeNumbers", () => {
@@ -54,7 +55,9 @@ describe("extractQuantities", () => {
 });
 
 describe("estimateTokens", () => {
-  it("is characters divided by four, rounded up", () => {
+  it("matches the real token count of a policy to within a few percent", () => {
     expect(estimateTokens("abcde")).toBe(2);
+    const gg = loadPolicy("GG.1503");
+    expect(Math.abs(estimateTokens(gg.canonicalText) - 14999) / 14999).toBeLessThan(0.03);
   });
 });
