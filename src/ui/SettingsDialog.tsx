@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { createLLM, memoryStore } from "../llm/client";
 import { idbCallStore } from "../llm/cache";
 import { useRunner } from "../store/runner";
+import { download } from "../export/csv";
+import { exportDemo } from "../store/demo";
 import { useGuides } from "../store/guides";
 import { useRuns } from "../store/runs";
 import { useSettings } from "../store/settings";
@@ -89,6 +91,16 @@ export function SettingsDialog() {
             </Button>
             {cleared && <span className="text-[13px] text-ink-soft">Cleared.</span>}
             {running && <span className="text-[13px] text-ink-soft">Not available while a run is in progress.</span>}
+          </div>
+        </div>
+
+        <div>
+          <p className="font-semibold">Demo file</p>
+          <p className="mt-0.5 text-[13px] text-ink-soft">
+            Downloads everything saved in this browser (runs and Policy Guide reviews, never the key) as one file. Shipped with the site, it lets a visitor without a key open the full results. See the README for where to put it.
+          </p>
+          <div className="mt-2">
+            <Button onClick={() => download("readily-demo.json", JSON.stringify(exportDemo()), "application/json")}>Export saved work as a demo file</Button>
           </div>
         </div>
 

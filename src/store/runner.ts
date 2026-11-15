@@ -1,7 +1,7 @@
 // Runs the questionnaire pipeline in the browser and keeps the screens informed.
 // One run at a time. Every finished API call is saved, so a stopped run resumes for free.
 import { create } from "zustand";
-import { TASKS, type TaskKey } from "../config/models";
+import type { TaskKey } from "../config/models";
 import { createLLM, LLMError, UsageTracker, type LLMErrorKind, type TaskUsage } from "../llm/client";
 import { idbCallStore } from "../llm/cache";
 import type { Library } from "../pipeline/library";
@@ -10,6 +10,7 @@ import { runQuestionnaire } from "../pipeline/runQuestionnaire";
 import { runSectionCheck } from "../pipeline/runSectionCheck";
 import type { LLM } from "../llm/client";
 import type { ParentResult } from "../types";
+import { currentAccuracy } from "./accuracy";
 import { loadApl, loadGuide, loadLibrary, loadQuestionnaire, useCatalog, type Catalog } from "./catalog";
 import { useGuides } from "./guides";
 import { useRuns, type Run } from "./runs";
@@ -155,7 +156,8 @@ export const useRunner = create<RunnerState>((set, get) => {
     createdAt: now,
     updatedAt: now,
     status: "running" as const,
-    models: { fullReading: TASKS.fullReading.model, secondOpinion: TASKS.secondOpinion.model },
+    // a new run uses the accuracy switches as they stand now; a resumed run keeps its own
+    models: currentAccuracy(),
     cost: 0,
     usageByTask: {},
     results: [],
@@ -175,7 +177,7 @@ export const useRunner = create<RunnerState>((set, get) => {
       const previous = resumeRunId ? useRuns.getState().runs[resumeRunId] : undefined;
       const now = Date.now();
       const base: Run = previous
-        ? { ...previous, status: "running", updatedAt: now }
+        ? { ...previous, demo: undefined, status: "running", updatedAt: now }
         : { ...blank(now), id: `run-${now.toString(36)}`, kind: "questionnaire", sourceId: questionnaireId, title: `APL ${meta.aplNumber}: ${meta.subject}`, questionCount: meta.questionCount, checkCount: null, policiesRead: catalog.counts.mediCalPolicies };
 
       return launch(catalog, base, !previous, async ({ library, llm, tracker, signal, onProgress, patchActive, save, current }) => {

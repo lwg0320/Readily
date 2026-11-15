@@ -1,8 +1,10 @@
 import { useEffect } from "react";
 import { HashRouter, Route, Routes } from "react-router-dom";
 import { useCatalog } from "../store/catalog";
+import { loadDemos } from "../store/demo";
 import { useGuides } from "../store/guides";
 import { useRuns } from "../store/runs";
+import { Compare } from "./Compare";
 import { GuidePage } from "./GuidePage";
 import { Home } from "./Home";
 import { QuestionDetail } from "./QuestionDetail";
@@ -16,8 +18,8 @@ export function App() {
   const loadGuides = useGuides((s) => s.load);
   useEffect(() => {
     void load();
-    void loadRuns();
-    void loadGuides();
+    // saved work in this browser first, then any demo files, which never replace it
+    void Promise.all([loadRuns(), loadGuides()]).then(loadDemos);
   }, [load, loadRuns, loadGuides]);
 
   return (
@@ -38,6 +40,7 @@ export function App() {
             <Route path="/guide/:id" element={<GuidePage />} />
             <Route path="/guide/:id/:sectionId" element={<GuidePage />} />
             <Route path="/run/:runId" element={<Results />} />
+            <Route path="/run/:runId/compare/:otherId" element={<Compare />} />
             <Route path="/run/:runId/q/:n" element={<QuestionDetail />} />
             <Route path="*" element={<Home />} />
           </Routes>

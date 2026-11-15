@@ -26,7 +26,9 @@ export function VerdictCounts({ run }: { run: Run }) {
 
 export const accuracyText = (run: Pick<Run, "models">) => {
   const { fullReading, secondOpinion } = run.models;
-  return fullReading === secondOpinion ? `${MODELS[fullReading].label} accuracy` : `${MODELS[fullReading].label} reading, ${MODELS[secondOpinion].label.toLowerCase()} second opinion`;
+  // MODELS[…].label is "Standard" or "Maximum accuracy"
+  const word = (m: keyof typeof MODELS) => MODELS[m].label.replace(/ accuracy$/, "");
+  return fullReading === secondOpinion ? `${word(fullReading)} accuracy` : `${word(fullReading)} reading, ${word(secondOpinion).toLowerCase()} second opinion`;
 };
 
 export const costText = (run: Run) => {

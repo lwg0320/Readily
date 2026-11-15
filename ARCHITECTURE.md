@@ -135,11 +135,15 @@ No backend, no database server, no embeddings, no Batch API.
     store/catalog.ts               # loads public/data; the full library loads when a run starts
     store/runs.ts                  # saved runs (IndexedDB), approvals and edits
     store/guides.ts                # per Guide section: obligations found, ticks, latest check
+    store/accuracy.ts              # the two accuracy switches
+    store/demo.ts                  # exporting saved work, loading demo files
+    pipeline/compare.ts            # questions two runs answer differently
     store/runner.ts                # start / resume / pause a run, live progress
     app.css                        # design tokens, the highlight and the approval stamp
     ui/App.tsx, Shell.tsx          # routes, header, footer
     ui/Home.tsx, QuestionnaireStart.tsx, Results.tsx, QuestionDetail.tsx
     ui/GuidePage.tsx               # the three-column Policy Guide screen
+    ui/AccuracyControl.tsx, Compare.tsx
     ui/PdfPane.tsx, findQuote.ts   # PDF page + best-effort quote highlight
     ui/SettingsDialog.tsx, RunSummary.tsx, bits.tsx, labels.ts, hooks.ts
     eval/                          # dev-only accuracy page (§12)
@@ -308,7 +312,7 @@ export const PIPELINE = {
 };
 ```
 
-The UI toggles override `fullReading.model` and `secondOpinion.model` for the next run only. They reset to these defaults on reload.
+The UI switches (`store/accuracy.ts`) override `fullReading.model` and `secondOpinion.model` for the next run that is started. A resumed run keeps the settings it began with. The switches reset to these defaults on reload.
 
 ---
 
@@ -632,7 +636,9 @@ Re-running with a different toggle creates a **new run**. Unchanged steps hit th
 
 ### 9.3 Demo replay
 
-Settings has "Export this run as a demo file", which downloads the run as JSON. Files placed in `public/demo/` and listed in `public/demo/index.json` are loaded at start as read-only runs. This lets the hosted site show full results to someone with no API key. Live runs still need a key.
+Settings has **Export saved work as a demo file**, which downloads everything saved in that browser as one JSON file: `{ readilyDemo: 1, exportedAt, runs, guideWork }` (answers, quotes, Guide obligations; never the API key). Files placed in `public/demo/` and listed in `public/demo/index.json` (an array of file names; `[]` in the repo) are loaded when the app opens (`store/demo.ts`). Their runs are marked "Demo run". This lets the hosted site show full results to someone with no API key, who can open every answer, approve and export. Live runs still need a key.
+
+Rules: what the browser already has wins over the demo file, so a visitor's own approvals on a demo run survive a reload; a demo run is not written to the visitor's storage until they change it; "Clear saved results" brings the demo back as shipped.
 
 ---
 
@@ -652,8 +658,8 @@ Language in the UI is plain: "policies", "checks", "second opinion". No model ja
 ### 10.2 Shell
 
 - Header: product name, plan name ("CalOptima Health"), **Accuracy** control, Settings.
-- **Accuracy control:** two switches, "Full reading" and "Second opinion", each Standard (Haiku) ↔ Maximum accuracy (Opus). Disabled during a run. If they differ, show: "Using different models loads the policies twice. The extra cost is included in the estimate."
-- **Settings:** API key field (stored only in this browser, with a line saying so), a "Test key" button (one tiny call), "Clear saved results", "Export this run as a demo file".
+- **Accuracy control** (`ui/AccuracyControl.tsx`): two switches in the header, "Full reading" and "Second opinion", each Standard (Haiku) ↔ Maximum (Opus). Locked during a run. An info button beside them explains both steps, what each setting costs, that the first pass always uses the fast model, and that the switches apply to the next run. If the two differ, it and the start screen say that the policies are loaded once for each model and that the extra cost is in the estimate.
+- **Settings:** API key field (stored only in this browser, with a line saying so), a "Test key" button (one tiny call), "Clear saved results", "Export saved work as a demo file".
 - If there is no API key, Run buttons are replaced by "Add your API key to run live" and any demo runs are still viewable.
 
 ### 10.3 Screens
@@ -684,8 +690,9 @@ Language in the UI is plain: "policies", "checks", "second opinion". No model ja
 - "Wording differs" and "policy may be outdated" are not shown on rows: on the first real run they applied to most rows and made every row look alike. They stay on the question's own page, and outdated policies are summarised once above the list ("GG.1503 (cited in 34 answers) was last revised 2024-09-01, before APL 25-008 …").
 - The summary line also says how long the run took.
 - Progress: "n of 64 approved". Buttons: **Fill DHCS form**, **Download CSV**.
-- If another run exists for the same questionnaire: **Show differences** lists questions whose verdict differs between the two runs, side by side.
-- Re-run button reflecting the current toggles, with its estimate.
+- If another run exists for the same questionnaire: **Compare with…** opens `/run/:runId/compare/:otherId`, which lists the questions whose verdict differs between the two runs, side by side (verdict, parts stated and citation in each; clicking one opens that answer), and says how many got the same verdict.
+- When the header switches differ from this run's settings: "Running again makes a new run and keeps this one: about $50 and 10 minutes" with **Run again at these settings**. The estimate counts only what is not already saved.
+- A demo run says so above the list.
 
 **Question detail (`/run/:runId/q/:n`)** — Step 17. Split view.
 - Left panel:
@@ -733,7 +740,9 @@ Averages measured on the full 64-question run (211 checks, 251 policies), multip
 - Step 13 with its tie-breaks, per question: 4.8k input, 309k cache read, 9.4k output. If the two models differ, it also pays the 42k cache write.
 - Time: about 2 s per Step 9 call and 10 s per reading call, divided by `concurrency`, plus about 3 minutes for the longest chain.
 
-This gives about **$2.26 and 11 minutes** on the defaults (measured: $2.23) and about **$50** with both steps on Opus. After a run, always show the **actual** cost from recorded usage. Work already saved in the browser is reused, so a repeat run costs less than the estimate; the start screen says so.
+This gives about **$2.26 and 11 minutes** on the defaults (measured: $2.23) and about **$51** with both steps on Opus ($32 with only the second opinion on Opus).
+
+When a finished run of the same questionnaire is saved in the browser, the estimate leaves out what will be reused: the checklists and the pass over every policy always; the full reading if its switch is unchanged; the second opinion only if both switches are unchanged, because a second opinion is given on a particular reading. So running again with the same settings shows as free, and moving both switches to Maximum after a Standard run shows about $50, not $51. After a run, always show the **actual** cost from recorded usage. Work already saved in the browser is reused, so a repeat run costs less than the estimate; the start screen says so.
 
 ---
 
@@ -773,7 +782,7 @@ Build in this order. Do not start a phase until the previous one passes.
    - No citation anywhere to a non-Medi-Cal policy.
 5. **Questionnaire UI.** Start → progress with partial results → results → detail with PDF → approve → export filled form (open it in a PDF reader and confirm Q1, Q12 and Q64 landed in the right fields). Built without the accuracy switches, the differences view and the Policy Guide entry on Home, which belong to phases 6 and 7. `tests/export.test.ts` fills the real form and reads Q1, Q12 and Q64 back.
 6. **Guide.** Section list, find obligations on "(Updated January 2026) Community Supports" (expect two Transitional Rent obligations), highlights, check → `not_found` with a closest policy. `tests/guide.test.ts` covers the sentence splitter on every section of the real Guide, the obligation bookkeeping and the section check, with a simulated API.
-7. **Toggles, estimates, differences view, demo export/replay.**
+7. **Toggles, estimates, differences view, demo export/replay.** Driven in Chrome against a simulated API: prices follow the switches, the switches lock during a run, a second run at Maximum reuses the first pass and sends only reading and second-opinion calls to Opus, the comparison lists exactly the questions that changed, and an exported demo file opens in a clean browser without a key.
 8. **Accuracy page.**
 
 Measured cost of one full questionnaire run on defaults: $2.23 (reading every policy $0.71, full reading $0.98, second opinion and tie-breaks $0.49, checklists $0.04), in about 12 minutes at 10 parallel calls. A full run of the three demo Guide sections: about $0.80.

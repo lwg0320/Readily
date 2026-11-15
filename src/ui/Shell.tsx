@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { useCatalog } from "../store/catalog";
 import { useRunner } from "../store/runner";
 import { useSettings } from "../store/settings";
+import { AccuracyControl } from "./AccuracyControl";
 import { Button, Icon } from "./bits";
 import { PRIVACY, SettingsDialog } from "./SettingsDialog";
 
@@ -25,6 +26,7 @@ export function Shell({ children }: { children: ReactNode }) {
                 Run in progress
               </Link>
             )}
+            <AccuracyControl />
             {!apiKey && <span className="text-[13px] text-ink-soft">No API key yet</span>}
             <Button kind="quiet" onClick={() => openSettings(true)} className="!px-2.5 !py-1.5">
               <Icon name="gear" />

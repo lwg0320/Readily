@@ -3,7 +3,9 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 import { download, runToCsv } from "../export/csv";
 import { fillForm, type FormAnswer } from "../export/fillForm";
+import { estimateQuestionnaire, formatCost } from "../pipeline/estimate";
 import { sortByRisk } from "../pipeline/verdicts";
+import { useAccuracy } from "../store/accuracy";
 import { loadQuestionnaire, pdfUrl, useCatalog } from "../store/catalog";
 import { useRunner } from "../store/runner";
 import { currentAnswer, failedCount, outdatedPolicies, useRuns } from "../store/runs";
@@ -12,6 +14,7 @@ import type { ParentResult, Verdict } from "../types";
 import { Bar, Button, Icon, VerdictChip, VerdictInfo } from "./bits";
 import { useLoaded } from "./hooks";
 import { rowFlags, VERDICT_LABEL, VERDICT_ORDER } from "./labels";
+import { when } from "./bits";
 import { accuracyText, costText, verdictCounts } from "./RunSummary";
 import { Page } from "./Shell";
 
@@ -25,6 +28,8 @@ export function Results() {
   const catalog = useCatalog((s) => s.catalog);
   const { active, start } = useRunner();
   const hasKey = useSettings((s) => !!s.apiKey);
+  const { fullReading, secondOpinion } = useAccuracy();
+  const allRuns = useRuns((s) => s.runs);
   const questionnaire = useLoaded(run?.kind === "questionnaire" ? run.sourceId : undefined, () => loadQuestionnaire(run!.sourceId)).value;
 
   const [filter, setFilter] = useState<Verdict | null>(null);
@@ -65,6 +70,11 @@ export function Results() {
   const failed = failedCount(run);
   const outdated = outdatedPolicies(run);
   const meta = catalog.questionnaires.find((q) => q.id === run.sourceId);
+  const others = Object.values(allRuns)
+    .filter((r) => r.id !== run.id && r.kind === "questionnaire" && r.sourceId === run.sourceId && r.results.length > 0)
+    .sort((x, y) => y.createdAt - x.createdAt);
+  const switched = run.models.fullReading !== fullReading || run.models.secondOpinion !== secondOpinion;
+  const again = estimateQuestionnaire({ questions: run.questionCount, mediCalPolicies: catalog.counts.mediCalPolicies, models: { fullReading, secondOpinion }, reuse: run.demo ? undefined : run.models });
   const text = new Map(questionnaire?.questions.map((q) => [String(q.number), q.text]));
 
   const exportCsv = () => questionnaire && download(`APL-${meta?.aplNumber ?? run.sourceId}-answers.csv`, runToCsv(questionnaire.questions, run.results), "text/csv;charset=utf-8");
@@ -146,6 +156,52 @@ export function Results() {
               </span>
               {hasKey && !active && <Button onClick={() => start(run.sourceId, run.id)}>Retry these</Button>}
             </>
+          )}
+        </div>
+      )}
+
+      {run.demo && <p className="mt-3 rounded bg-marker-soft px-4 py-2 text-[14px]">This is a demo run that came with the site. You can open every answer, approve and export without an API key. What you approve is kept in this browser.</p>}
+
+      {(others.length > 0 || (switched && run.status === "done")) && (
+        <div className="mt-4 flex flex-wrap items-center gap-x-6 gap-y-2 rounded-md border border-rule bg-paper px-4 py-3 text-[14px]">
+          {switched && run.status === "done" && (
+            <div className="flex flex-wrap items-center gap-3">
+              <span>
+                The switches are now set to {accuracyText({ models: { fullReading, secondOpinion } }).toLowerCase()}. Running again makes a new run and keeps this one: about {formatCost(again.cost)} and {again.minutes} minutes.
+              </span>
+              {hasKey ? (
+                <Button
+                  disabled={!!active}
+                  onClick={() => {
+                    start(run.sourceId);
+                    navigate(`/questionnaire/${run.sourceId}`);
+                  }}
+                >
+                  Run again at these settings
+                </Button>
+              ) : (
+                <span className="text-ink-soft">Add an API key in Settings to run it.</span>
+              )}
+            </div>
+          )}
+          {others.length > 0 && (
+            <label className="flex items-center gap-2">
+              Compare with
+              <select
+                value=""
+                onChange={(e) => e.target.value && navigate(`/run/${run.id}/compare/${e.target.value}`)}
+                className="rounded border border-rule bg-paper px-2 py-1.5"
+                aria-label="Show where this run and another run disagree"
+              >
+                <option value="">another run of this questionnaire…</option>
+                {others.map((o) => (
+                  <option key={o.id} value={o.id}>
+                    {when(o.createdAt)}, {accuracyText(o)}
+                    {o.demo ? ", demo" : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
           )}
         </div>
       )}

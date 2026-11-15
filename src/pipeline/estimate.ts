@@ -22,8 +22,16 @@ const PER_POLICY_PER_BUNDLE = { input: 8150, cacheWrite: 20, cacheRead: 4880, ou
 
 export type Estimate = { cost: number; minutes: number };
 
-export function estimateQuestionnaire(args: { questions: number; mediCalPolicies: number; models: { fullReading: ModelKey; secondOpinion: ModelKey } }): Estimate {
-  const { questions, mediCalPolicies, models } = args;
+type Choice = { fullReading: ModelKey; secondOpinion: ModelKey };
+
+/**
+ * `reuse`: the settings of a run already finished in this browser. Its saved work is not paid
+ * for again: the checklists and the pass over every policy always, the full reading if its
+ * setting is unchanged, and the second opinion only if both settings are unchanged (a second
+ * opinion is given on a particular reading, so a new reading needs a new one).
+ */
+export function estimateQuestionnaire(args: { questions: number; mediCalPolicies: number; models: Choice; reuse?: Choice }): Estimate {
+  const { questions, mediCalPolicies, models, reuse } = args;
   const scale = (t: Tokens, n: number): Tokens => ({ input: t.input * n, cacheWrite: t.cacheWrite * n, cacheRead: t.cacheRead * n, output: t.output * n });
   const bundles = Math.max(1, Math.min(PIPELINE.bundles, Math.ceil((questions * PER_QUESTION.checks) / PIPELINE.itemsPerBundle)));
   const screeningCalls = bundles * mediCalPolicies;
@@ -34,15 +42,21 @@ export function estimateQuestionnaire(args: { questions: number; mediCalPolicies
       ? PER_QUESTION.secondOpinion
       : { ...PER_QUESTION.secondOpinion, cacheWrite: PER_QUESTION.fullReading.cacheWrite, cacheRead: PER_QUESTION.secondOpinion.cacheRead - PER_QUESTION.fullReading.cacheWrite };
 
+  const readingAgain = !reuse || reuse.fullReading !== models.fullReading;
+  const secondAgain = readingAgain || reuse!.secondOpinion !== models.secondOpinion;
+  // a second opinion asked for on its own finds no cached policies waiting, whatever the models
+  const secondAlone: Tokens = { ...second, cacheWrite: PER_QUESTION.fullReading.cacheWrite };
+  if (reuse && !secondAgain) return { cost: 0, minutes: 1 };
+
   const cost =
-    price(TASKS.checklist.model, scale(PER_QUESTION.checklist, questions)) +
-    price(TASKS.readEveryPolicy.model, scale(PER_POLICY_PER_BUNDLE, screeningCalls)) +
-    price(models.fullReading, scale(PER_QUESTION.fullReading, questions)) +
-    price(models.secondOpinion, scale(second, questions));
+    (reuse ? 0 : price(TASKS.checklist.model, scale(PER_QUESTION.checklist, questions)) + price(TASKS.readEveryPolicy.model, scale(PER_POLICY_PER_BUNDLE, screeningCalls))) +
+    (readingAgain ? price(models.fullReading, scale(PER_QUESTION.fullReading, questions)) : 0) +
+    price(models.secondOpinion, scale(readingAgain ? second : secondAlone, questions));
 
   // measured: about 2 s per first-pass call and 10 s per reading call, shared among the parallel slots;
   // one group's chain of reading, second opinion and last look takes about 3 minutes however many slots there are
-  const seconds = (screeningCalls * 2 + questions * PER_QUESTION.readingCalls * 10) / PIPELINE.concurrency + 180;
+  const readingCalls = questions * PER_QUESTION.readingCalls * (readingAgain ? 1 : 0.5);
+  const seconds = ((reuse ? 0 : screeningCalls * 2) + readingCalls * 10) / PIPELINE.concurrency + 180;
   return { cost, minutes: Math.max(1, Math.ceil(seconds / 60)) };
 }
 

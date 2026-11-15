@@ -1,8 +1,8 @@
 // Start screen and live progress for one questionnaire (ARCHITECTURE.md §10.3).
 import type { ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { TASKS } from "../config/models";
 import { estimateQuestionnaire, formatCost } from "../pipeline/estimate";
+import { useAccuracy } from "../store/accuracy";
 import { useCatalog } from "../store/catalog";
 import { useRunner, type ActiveRun } from "../store/runner";
 import { useRuns, type Run } from "../store/runs";
@@ -18,6 +18,7 @@ export function QuestionnaireStart() {
   const { active, problem, start, dismissProblem } = useRunner();
   const runs = useRuns((s) => s.runs);
   const { apiKey, openSettings } = useSettings();
+  const { fullReading, secondOpinion } = useAccuracy();
   const meta = catalog?.questionnaires.find((q) => q.id === id);
   if (!catalog) return null;
   if (!meta)
@@ -33,8 +34,11 @@ export function QuestionnaireStart() {
   const mine = Object.values(runs)
     .filter((r) => r.sourceId === id)
     .sort((a, b) => b.updatedAt - a.updatedAt);
-  const models = { fullReading: TASKS.fullReading.model, secondOpinion: TASKS.secondOpinion.model };
-  const estimate = estimateQuestionnaire({ questions: meta.questionCount, mediCalPolicies: catalog.counts.mediCalPolicies, models });
+  const models = { fullReading, secondOpinion };
+  // a finished run in this browser means its saved work is not paid for again
+  const finished = mine.find((r) => r.status === "done" && !r.demo);
+  const estimate = estimateQuestionnaire({ questions: meta.questionCount, mediCalPolicies: catalog.counts.mediCalPolicies, models, reuse: finished?.models });
+  const fromScratch = estimateQuestionnaire({ questions: meta.questionCount, mediCalPolicies: catalog.counts.mediCalPolicies, models });
   const running = active?.sourceId === id ? active : null;
   const runningRun = running ? runs[running.runId] : undefined;
   const paused = mine.find((r) => r.status === "paused");
@@ -80,7 +84,10 @@ export function QuestionnaireStart() {
             <li>Reads the policies that matter in full and quotes the exact text.</li>
             <li>Checks every quote against the source, and gets a second opinion on every answer.</li>
           </ol>
-          <p className="mt-4 text-[14px] text-ink-soft">Runs at {accuracyText({ models }).toLowerCase()}.</p>
+          <p className="mt-4 text-[14px] text-ink-soft">
+            The next run uses {accuracyText({ models }).toLowerCase()}. Change it with the two switches at the top of the page.
+            {fullReading !== secondOpinion && " Because the two steps are set differently, the policies are loaded once for each model; that is included in the price below."}
+          </p>
 
           <div className="mt-5 flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-rule-soft pt-5">
             {apiKey ? (
@@ -99,9 +106,11 @@ export function QuestionnaireStart() {
                     Run all {meta.questionCount} questions
                   </Button>
                   <span className="text-[14px] text-ink-soft">
-                    {mine.length > 0
-                      ? `Work already finished in this browser is reused at no cost. From scratch, a run is about ${formatCost(estimate.cost)} and ${estimate.minutes} minutes.`
-                      : `About ${formatCost(estimate.cost)} and ${estimate.minutes} minutes. You can start reviewing as soon as the first answers arrive.`}
+                    {!finished
+                      ? `About ${formatCost(estimate.cost)} and ${estimate.minutes} minutes. You can start reviewing as soon as the first answers arrive.`
+                      : estimate.cost === 0
+                        ? "You already ran it with these settings, so everything is saved: a new run costs nothing and gives you a fresh list to approve."
+                        : `About ${formatCost(estimate.cost)} and ${estimate.minutes} minutes. The first pass over every policy is reused from your earlier run; only the steps you switched are paid for.`}
                   </span>
                 </>
               )
@@ -111,7 +120,7 @@ export function QuestionnaireStart() {
                   Add your API key to run live
                 </Button>
                 <span className="text-[14px] text-ink-soft">
-                  A full run costs about {formatCost(estimate.cost)} on your Anthropic account. Saved answers can be opened without a key.
+                  A full run costs about {formatCost(fromScratch.cost)} on your Anthropic account. Saved answers can be opened without a key.
                 </span>
               </>
             )}
@@ -142,7 +151,7 @@ function PastRun({ run, onOpen }: { run: Run; onOpen: () => void }) {
         <p className="text-[14px]">
           <span className="font-semibold">{when(run.createdAt)}</span>
           <span className="text-ink-soft">
-            , {accuracyText(run)}, {costText(run)}
+            {run.demo && ", demo run"}, {accuracyText(run)}, {costText(run)}
             {run.status === "paused" && `, paused with ${run.results.length} of ${run.questionCount} answers ready`}
           </span>
         </p>

@@ -16,6 +16,8 @@ export type Run = {
   /** For a section check: the section and the obligations that were checked, as they were then. */
   section?: { id: string; title: string; path: string[]; pageStart: number; obligations: Obligation[] };
   title: string;
+  /** Came with the site as a demo file, not from a run in this browser. */
+  demo?: boolean;
   createdAt: number;
   updatedAt: number;
   /** "paused": stopped before every answer was ready (cancelled, tab closed, key or network problem). */
@@ -41,6 +43,8 @@ type RunsState = {
   patchResult(runId: string, parentId: string, patch: Partial<Pick<ParentResult, "approved" | "edited" | "followUp">>): void;
   clearAll(): Promise<void>;
   remove(runId: string): void;
+  /** Adds runs from a demo file, unless this browser already has its own copy. Not written to disk until changed. */
+  addDemo(runs: Run[]): void;
 };
 
 const persist = (run: Run) => void idbSet(run.id, run, db).catch((err) => console.error("Could not save the run", err));
@@ -81,6 +85,12 @@ export const useRuns = create<RunsState>((set, get) => ({
     await clear(db);
     set({ runs: {} });
   },
+  addDemo: (demo) =>
+    set((s) => {
+      const runs = { ...s.runs };
+      for (const r of demo) if (!runs[r.id]) runs[r.id] = { ...r, demo: true, status: r.status === "running" ? "paused" : r.status };
+      return { runs };
+    }),
   remove: (runId) => {
     set((s) => {
       const { [runId]: _gone, ...rest } = s.runs;

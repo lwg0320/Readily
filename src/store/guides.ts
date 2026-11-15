@@ -35,6 +35,8 @@ type GuidesState = {
   setTicked(guideId: string, sectionId: string, obligationId: string, ticked: boolean): void;
   setRun(guideId: string, sectionId: string, runId: string | null): void;
   clearAll(): Promise<void>;
+  /** Adds section work from a demo file, unless this browser already has its own for that section. */
+  addDemo(work: SectionWork[]): void;
 };
 
 export const useGuides = create<GuidesState>((set, get) => {
@@ -91,6 +93,12 @@ export const useGuides = create<GuidesState>((set, get) => {
       const w = get().get(guideId, sectionId);
       if (w) put({ ...w, runId });
     },
+    addDemo: (demo) =>
+      set((s) => {
+        const work = { ...s.work };
+        for (const w of demo) if (!work[keyOf(w.guideId, w.sectionId)]) work[keyOf(w.guideId, w.sectionId)] = w;
+        return { work };
+      }),
     clearAll: async () => {
       await clear(db);
       set({ work: {} });

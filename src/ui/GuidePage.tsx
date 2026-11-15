@@ -3,11 +3,11 @@
 // once checked, whether the plan's policies state each one.
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { TASKS } from "../config/models";
 import { estimateSectionCheck, formatCost } from "../pipeline/estimate";
 import type { Obligation } from "../pipeline/findObligations";
 import { splitSentences, type Sentence } from "../pipeline/sentences";
 import { formatCitation } from "../pipeline/verdicts";
+import { useAccuracy } from "../store/accuracy";
 import { loadGuide, pdfUrl, useCatalog } from "../store/catalog";
 import { useGuides, type SectionWork } from "../store/guides";
 import { useRunner, type ActiveRun } from "../store/runner";
@@ -16,7 +16,7 @@ import { useSettings } from "../store/settings";
 import type { GuideSection, ItemResult, Verdict } from "../types";
 import { Bar, Button, Icon, VerdictChip, VerdictInfo } from "./bits";
 import { useLoaded } from "./hooks";
-import { costText } from "./RunSummary";
+import { accuracyText, costText } from "./RunSummary";
 import { Page } from "./Shell";
 
 // one bookmark in the Guide lost its opening bracket: "Updated January 2026) Provider Contracting:"
@@ -213,6 +213,7 @@ function ObligationsPanel({ guideId, section, work, run, picked, onPick }: { gui
   const catalog = useCatalog((s) => s.catalog)!;
   const { apiKey, openSettings } = useSettings();
   const { find, finding, problem, setTicked } = useGuides();
+  const { fullReading, secondOpinion } = useAccuracy();
   const { active, startSection, cancel, problem: runProblem, dismissProblem } = useRunner();
   const key = `${guideId}/${section.id}`;
   const busyFinding = finding === key;
@@ -247,7 +248,9 @@ function ObligationsPanel({ guideId, section, work, run, picked, onPick }: { gui
   const checkedIds = new Set(run?.section?.obligations.map((o) => o.id));
   const byId = new Map(result?.items.map((i) => [i.item.id, i]));
   const sameSet = !!run && ticked.length === checkedIds.size && ticked.every((o) => checkedIds.has(o.id));
-  const estimate = estimateSectionCheck({ obligations: Math.max(1, ticked.length), mediCalPolicies: catalog.counts.mediCalPolicies, models: { fullReading: TASKS.fullReading.model, secondOpinion: TASKS.secondOpinion.model } });
+  const estimate = estimateSectionCheck({ obligations: Math.max(1, ticked.length), mediCalPolicies: catalog.counts.mediCalPolicies, models: { fullReading, secondOpinion } });
+  // the same obligations checked at different accuracy settings is a new check
+  const sameSettings = !!run && run.models.fullReading === fullReading && run.models.secondOpinion === secondOpinion;
 
   return (
     <>
@@ -330,7 +333,7 @@ function ObligationsPanel({ guideId, section, work, run, picked, onPick }: { gui
           <>
             {run?.status === "done" && sameSet && (
               <p className="mb-2.5 text-[13.5px] text-ink-soft">
-                Checked against all {run.policiesRead} Medi-Cal policies, {costText(run)}.
+                Checked against all {run.policiesRead} Medi-Cal policies at {accuracyText(run).toLowerCase()}, {costText(run)}.
               </p>
             )}
             {run?.status === "paused" && <p className="mb-2.5 text-[13.5px] text-review">The check was paused. Finished work is saved.</p>}
@@ -343,7 +346,7 @@ function ObligationsPanel({ guideId, section, work, run, picked, onPick }: { gui
                 <Button kind="primary" onClick={() => startSection(guideId, section.id, run.id)} disabled={!!active}>
                   Resume the check
                 </Button>
-              ) : run?.status === "done" && sameSet ? null : (
+              ) : run?.status === "done" && sameSet && sameSettings ? null : (
                 <>
                   <Button kind="primary" onClick={() => startSection(guideId, section.id)} disabled={!!active || ticked.length === 0}>
                     Check {ticked.length} {ticked.length === 1 ? "obligation" : "obligations"} against your policies

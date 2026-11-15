@@ -99,7 +99,10 @@ function RunRow({ run }: { run: Run }) {
   return (
     <li className="flex items-center gap-4 px-5 py-3.5">
       <div className="min-w-0 flex-1">
-        <p className="font-semibold">{run.title}</p>
+        <p className="font-semibold">
+          {run.title}
+          {run.demo && <span className="ml-2 rounded-sm bg-marker-soft px-1.5 py-0.5 text-[12px]">Demo run</span>}
+        </p>
         <p className="mt-0.5 text-[13px] text-ink-soft">
           {when(run.createdAt)}, {accuracyText(run)}, {costText(run)}
         </p>

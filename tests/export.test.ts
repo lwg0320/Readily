@@ -110,3 +110,27 @@ describe("findQuote (PDF highlight)", () => {
     expect(findQuote(pieces, "1.")).toEqual([]);
   });
 });
+
+describe("estimates when earlier work is saved (phase 7)", () => {
+  const base = { questions: 64, mediCalPolicies: 251 };
+  const haiku = { fullReading: "haiku", secondOpinion: "haiku" } as const;
+  const opus = { fullReading: "opus", secondOpinion: "opus" } as const;
+  const from = (models: typeof haiku | typeof opus | { fullReading: "haiku" | "opus"; secondOpinion: "haiku" | "opus" }, reuse = haiku as { fullReading: "haiku" | "opus"; secondOpinion: "haiku" | "opus" }) => estimateQuestionnaire({ ...base, models, reuse });
+  it("costs nothing to run again with the same settings", () => {
+    expect(from(haiku).cost).toBe(0);
+  });
+  it("pays only for the switched steps, never again for the pass over every policy", () => {
+    const scratch = estimateQuestionnaire({ ...base, models: opus }).cost;
+    const upgrade = from(opus).cost;
+    expect(scratch - upgrade).toBeGreaterThan(0.7); // the checklists and the first pass, about $0.75
+    expect(scratch - upgrade).toBeLessThan(0.8);
+  });
+  it("a new second opinion alone is cheaper than a new reading plus the second opinion it needs", () => {
+    const onlySecond = from({ fullReading: "haiku", secondOpinion: "opus" }).cost;
+    const onlyReading = from({ fullReading: "opus", secondOpinion: "haiku" }).cost;
+    expect(onlySecond).toBeGreaterThan(10);
+    expect(onlySecond).toBeLessThan(from(opus).cost);
+    // switching the reading also re-pays the standard second opinion on the new reading
+    expect(onlyReading).toBeGreaterThan(estimateQuestionnaire({ ...base, models: opus }).cost / 2);
+  });
+});

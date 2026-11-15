@@ -17,7 +17,8 @@ The full design is in [ARCHITECTURE.md](ARCHITECTURE.md).
 | 4 | Questionnaire pipeline (`npm run try -- 10 11 25`, or `--all`) | Done; checked against the real API on all 64 questions (about $2.20 and 12 minutes on Haiku from scratch) |
 | 5 | Questionnaire screens and form export (`npm run dev`) | Done; every screen driven in Chrome against a simulated API. Not yet run in a browser with a real key. |
 | 6 | Policy Guide screen (`npm run try:section -- s015`) | Done; driven in Chrome against a simulated API. Not yet run with a real key. |
-| 7–8 | Accuracy toggles, replay, accuracy page | Not started |
+| 7 | Accuracy switches, run comparison, demo file | Done; driven in Chrome against a simulated API. No run at Maximum accuracy has been made with a real key. |
+| 8 | Accuracy page | Not started |
 
 ## Running the app
 
@@ -35,9 +36,18 @@ Open the address it prints (normally http://localhost:5173).
 
 To review the Policy Guide, click **Review this Guide** on the home page. Pick a section, press **Find obligations** (under a cent), then **Check obligations against your policies** (about $0.25 and four minutes per section, because every policy is read once against them). **See the evidence** opens the same evidence view as a questionnaire question.
 
+The two switches at the top of every page set the accuracy of the next run: **Standard** (about $2.30 for the questionnaire) or **Maximum** for the full reading, the second opinion, or both (about $50 with both). The price is shown before you start. After two runs of the same questionnaire, **Compare with…** on the answers page lists the questions they answer differently.
+
 Finished work is saved in the browser. A run that is paused, or interrupted by closing the tab, resumes without paying again. The browser's saved work is separate from what `npm run try` saves under `.cache/`, so the first run in the browser pays the full price even if you already ran the command line.
 
 `npm run build` produces the static site in `dist/` (it works from any folder, including GitHub Pages).
+
+## Letting someone without a key see results
+
+1. Do the runs and Policy Guide checks you want to show.
+2. **Settings → Export saved work as a demo file.** It downloads `readily-demo.json` (answers and quotes; never the key).
+3. Move that file to `public/demo/readily-demo.json` and change `public/demo/index.json` to `["readily-demo.json"]`.
+4. Commit both. Anyone who opens the site now sees those runs marked "Demo run" and can open, approve and export them. Starting a new run still needs a key.
 
 ## Trying one Policy Guide section from the command line
 

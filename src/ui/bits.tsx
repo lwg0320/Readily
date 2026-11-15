@@ -86,12 +86,11 @@ export function VerdictChip({ verdict, count, size = "md" }: { verdict: Verdict;
 }
 
 /**
- * The info button beside any set of verdicts. Hovering it, or focusing it with the keyboard or
- * a tap, shows what each verdict means and what to do with it.
+ * An info button with an explanation that shows on hover, on keyboard focus, and after a tap.
+ * The panel is placed in window coordinates so that it is never cut off by a scrolling area or
+ * the window edge: below the button when there is room, otherwise above, otherwise as high as it fits.
  */
-export function VerdictInfo() {
-  // Placed in window coordinates so that it is never cut off by a scrolling area or the window
-  // edge: below the button when there is room, otherwise above, otherwise as high as it fits.
+export function InfoTip({ label, children }: { label: string; children: ReactNode }) {
   const tip = useRef<HTMLDivElement>(null);
   const [at, setAt] = useState({ left: 0, top: 0 });
   const place = (e: { currentTarget: HTMLElement }) => {
@@ -107,22 +106,31 @@ export function VerdictInfo() {
   };
   return (
     <div className="info inline-flex" onMouseEnter={place} onFocus={place}>
-      <button type="button" aria-label="What the verdicts mean" className="flex h-6 w-6 items-center justify-center rounded-full text-ink-soft hover:bg-rule-soft hover:text-ink">
+      <button type="button" aria-label={label} className="flex h-6 w-6 items-center justify-center rounded-full text-ink-soft hover:bg-rule-soft hover:text-ink">
         <Icon name="info" />
       </button>
       <div ref={tip} role="tooltip" style={at} className="info-tip fixed z-50 w-[27rem] max-w-[calc(100vw-1.5rem)]">
-        <dl className="space-y-3 rounded-md border border-rule bg-paper p-4 text-left text-[13.5px] font-normal leading-snug text-ink shadow-lg">
-          {VERDICT_ORDER.map((v) => (
-            <div key={v}>
-              <dt>
-                <VerdictChip verdict={v} size="sm" />
-              </dt>
-              <dd className="mt-1 text-ink-soft">{VERDICT_MEANING[v]}</dd>
-            </div>
-          ))}
-        </dl>
+        <div className="rounded-md border border-rule bg-paper p-4 text-left text-[13.5px] font-normal leading-snug text-ink shadow-lg">{children}</div>
       </div>
     </div>
+  );
+}
+
+/** The info button beside any set of verdicts: what each one means and what to do with it. */
+export function VerdictInfo() {
+  return (
+    <InfoTip label="What the verdicts mean">
+      <dl className="space-y-3">
+        {VERDICT_ORDER.map((v) => (
+          <div key={v}>
+            <dt>
+              <VerdictChip verdict={v} size="sm" />
+            </dt>
+            <dd className="mt-1 text-ink-soft">{VERDICT_MEANING[v]}</dd>
+          </div>
+        ))}
+      </dl>
+    </InfoTip>
   );
 }
 
