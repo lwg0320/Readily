@@ -76,7 +76,8 @@ async function main() {
       for (const f of it.flags) if (f.detail !== it.readerReason && f.detail !== it.reviewer?.reason) console.log(wrap(`flag ${f.code}: ${f.detail}`, "      "));
       if (it.trail) console.log(wrap(`not found after reading ${it.trail.policiesRead} Medi-Cal policies · ${it.trail.exactTerms.map((t) => `“${t.term}”: ${t.hits} ${t.hits === 1 ? "policy" : "policies"}`).join(" · ")}${it.trail.closest ? ` · closest: ${formatCitation(it.trail.closest)}` : ""}`, "      "));
     }
-    console.log(wrap(`policies read in full: ${run.documentSets.map((d) => d.policies.map((p) => p.policyId).join(", ") + (d.lastLook ? " (last look)" : "")).join(" | ") || "none"}`, "\n  "));
+    console.log();
+    console.log(wrap(`policies read in full: ${run.documentSets.map((d) => d.policies.map((p) => p.policyId).join(", ") + (d.lastLook ? " (last look)" : "")).join(" | ") || "none"}`, "  "));
   }
 
   console.log("\n" + "═".repeat(100));

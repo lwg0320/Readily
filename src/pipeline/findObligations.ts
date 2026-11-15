@@ -43,7 +43,8 @@ function accountFor(out: ObligationsOutput, sentences: Sentence[]): SectionOblig
       sourceText: ids.map((id) => known.get(id)!.text).join(" "),
       page: known.get(ids[0])!.page,
       quantities: o.quantities,
-      searchTerms: [...new Set(o.searchTerms.map((t) => t.trim()).filter(Boolean))].slice(0, 4),
+      // a single common word ("ECM") points everywhere; phrases and codes are kept
+      searchTerms: [...new Set(o.searchTerms.map((t) => t.trim()).filter((t) => /\s/.test(t) || /\d/.test(t)))].slice(0, 4),
     });
   }
   const used = new Set(obligations.flatMap((o) => o.sentenceIds));

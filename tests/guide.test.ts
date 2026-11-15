@@ -59,7 +59,7 @@ describe("findObligations (Step 22)", () => {
   const model = {
     obligations: [
       { summary: "The MCP is strongly encouraged to offer housing-related Community Supports to Members enrolled in ECM under this Population of Focus.", actor: "plan", strength: "recommended", sentenceIds: ["S1"], quantities: [], searchTerms: ["Community Supports"] },
-      { summary: "The MCP must authorize the Member for ECM whenever it authorizes the Member for Transitional Rent.", actor: "plan", strength: "binding", sentenceIds: ["S3", "S2"], quantities: ["6 months"], searchTerms: ["Transitional Rent", "Transitional Rent", " "] },
+      { summary: "The MCP must authorize the Member for ECM whenever it authorizes the Member for Transitional Rent.", actor: "plan", strength: "binding", sentenceIds: ["S3", "S2"], quantities: ["6 months"], searchTerms: ["Transitional Rent", "Transitional Rent", " ", "ECM"] },
       { summary: "An obligation that points at nothing in the text.", actor: "plan", strength: "binding", sentenceIds: ["S99"], quantities: [], searchTerms: [] },
     ],
     nonObligations: [{ sentenceId: "S2", reason: "already used above" }],

@@ -30,12 +30,12 @@ An obligation is something an MCP, or a provider working with it, must or should
 - A description of a service is not an obligation unless the text says the MCP or a provider must or should do something about it.
 
 For each obligation give:
-- "summary": one plain, self-contained sentence that starts with who must act, for example "The MCP must authorize the Member for ECM whenever it authorizes Transitional Rent." Keep the section's own terms and any number or time limit. It must make sense to someone who has not read the section.
+- "summary": one plain, self-contained sentence that starts with who must act, for example "The MCP must authorize the Member for ECM whenever it authorizes Transitional Rent." Keep the section's own terms and any number or time limit. It must make sense to someone who has not read the section: if the duty applies only in a situation that a neighbouring sentence sets up, or to a group it names ("the Member" who was just authorized for a service), say which situation or group in the summary.
 - "actor": "plan" for the MCP, "provider" for a provider, otherwise "other".
 - "strength": "binding" for must, shall, required, may not; "recommended" for should, encouraged, expected.
 - "sentenceIds": the numbered sentences it comes from.
 - "quantities": numbers with units that are essential to it, for example "6 months". Usually empty.
-- "searchTerms": up to 4 short, distinctive phrases that a plan policy stating this would very likely contain, copied from the section (for example a program or service name). Not generic words.
+- "searchTerms": up to 4 short, distinctive phrases of two or more words that a plan policy stating this would very likely contain, copied from the section (for example a service name such as "Transitional Rent"). Not single words, and not terms that run through the whole Guide such as "ECM" or "MCP".
 
 You are also given a list of "cue" sentences: sentences that contain words such as must, should or required. Every cue sentence must be accounted for. For each cue sentence that you did not use in any obligation, add an entry to "nonObligations" with a reason of at most 12 words.
 
