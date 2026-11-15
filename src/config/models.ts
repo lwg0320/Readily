@@ -12,7 +12,7 @@ export const MODELS: Record<
   opus: { id: "claude-opus-5-5", label: "Maximum accuracy", short: "Opus", price: { input: 4.0, output: 20.0, cacheWrite: 5.0, cacheRead: 0.2 } },
 };
 
-export type TaskKey = "checklist" | "readEveryPolicy" | "fullReading" | "secondOpinion" | "findObligations";
+export type TaskKey = "checklist" | "readEveryPolicy" | "fullReading" | "secondOpinion" | "findObligations" | "baseline";
 
 // Thinking counts toward maxTokens on these models, so the limits are generous. You only pay
 // for tokens actually produced.
@@ -22,4 +22,5 @@ export const TASKS: Record<TaskKey, { model: ModelKey; effort: Effort; maxTokens
   fullReading: { model: "haiku", effort: "high", maxTokens: 16000, uiToggle: true }, // Step 11
   secondOpinion: { model: "haiku", effort: "high", maxTokens: 20000, uiToggle: true }, // Step 13, including its tie-break
   findObligations: { model: "haiku", effort: "high", maxTokens: 10000, uiToggle: false }, // Step 22
+  baseline: { model: "haiku", effort: "high", maxTokens: 6000, uiToggle: false }, // accuracy page only: the naive one-prompt comparison
 };

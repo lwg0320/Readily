@@ -61,6 +61,10 @@ export const loadGuide = (id: string) => once(guides, id, () => getJson<Guide>(`
 export const loadQuestionnaire = (id: string) => once(questionnaires, id, () => getJson<Questionnaire>(`questionnaires/${id}.json`));
 export const loadApl = (id: string) => once(apls, id, () => getJson<Apl>(`apl/${id}.json`));
 
+const policies = new Map<string, Promise<Policy>>();
+/** One policy's full text, without loading the whole library. */
+export const loadPolicy = (id: string) => once(policies, id, () => getJson<Policy>(`policies/${id}.json`));
+
 let library: Promise<Library> | null = null;
 
 /** The full Medi-Cal library, loaded once. `onProgress` counts policies as they arrive. */

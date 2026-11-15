@@ -146,7 +146,8 @@ No backend, no database server, no embeddings, no Batch API.
     ui/AccuracyControl.tsx, Compare.tsx
     ui/PdfPane.tsx, findQuote.ts   # PDF page + best-effort quote highlight
     ui/SettingsDialog.tsx, RunSummary.tsx, bits.tsx, labels.ts, hooks.ts
-    eval/                          # dev-only accuracy page (§12)
+    eval/labels.json, score.ts     # hand labels; scoring a saved run against them (§12)
+    eval/baseline.ts, EvalPage.tsx # the naive one-prompt comparison; the accuracy page
 ```
 
 Also create a `README.md` (prerequisites: Node 20+, Poppler; then `npm install`, `npm run prep`, `npm run dev`; where to paste the API key; what is deliberately not built) and a `.gitignore` (`node_modules`, `dist`, `.env*`).
@@ -288,6 +289,7 @@ export const TASKS = {
   fullReading:      { model: "haiku", effort: "high", maxTokens: 16000, uiToggle: true  },  // Step 11
   secondOpinion:    { model: "haiku", effort: "high", maxTokens: 20000, uiToggle: true  },  // Step 13, including its tie-break
   findObligations:  { model: "haiku", effort: "high", maxTokens: 10000, uiToggle: false },  // Step 22
+  baseline:         { model: "haiku", effort: "high", maxTokens: 6000,  uiToggle: false },  // §12, the naive comparison
 } as const;
 ```
 
@@ -757,14 +759,21 @@ When a finished run of the same questionnaire is saved in the browser, the estim
 
 ---
 
-## 12. Accuracy page (dev only, `/dev/eval`)
+## 12. Accuracy page (`#/dev/eval`, linked from Settings)
 
-Used to produce the numbers for the demo video.
+A working tool for whoever builds or evaluates the product; it is not on Alex's path. It answers one question: how often is the pipeline right, measured against a person's reading, and how much better is it than simply asking the model?
 
-- `src/eval/labels.json` (filled in by hand): `{ question: number, expectedVerdict: Verdict, expectedPolicies: string[], notes: string }[]`. Ship it with entries for Q10, Q11 and Q25 as examples and leave the rest for the author.
-- "Run labeled questions": runs the normal pipeline on just those questions.
-- "Run naive baseline": for each labeled question, one call with `GG.1503` + `GG.1550` full text and the prompt "Does the P&P state this? Answer yes or no with a citation." No checklist, no checks.
-- Table: per question — expected vs pipeline verdict vs baseline answer; whether every expected policy was a candidate and which layer found it (`foundBy`); count of wrong "covered"; percentage of quotes that were `exact`.
+- **Labels** (`src/eval/labels.json`): `{ question: number, expectedVerdict: Verdict, expectedPolicies: string[], notes: string }[]`. A label is what a person decided after reading the policies. The file ships with seven drafts (Q10, Q11, Q12, Q19, Q25, Q33, Q38) written from the policy text, each marked as a draft to confirm. Labels can be added and changed on the page; changes are kept in the browser (`readily.labels`) and "Download labels.json" produces the file to save back into the repository. The numbers mean little below about 20 labels spread over all five verdicts.
+- **Scoring a saved run** (`eval/score.ts`, plain code, no API): the page scores any saved questionnaire run, so measuring costs nothing beyond the run itself. A new run is not started from this page: run the questionnaire as usual (repeats are free from saved work) and pick it here.
+- **Naive baseline** (`eval/baseline.ts`, task `baseline`): for each labelled question, one call with the full text of `GG.1503` and `GG.1550` (cached) and the prompt "Does the P&P state this? Answer yes or no with a citation." No checklist, no reading of every policy, no checks, no second opinion. It uses the same model as the run's full reading; answers are kept in the browser per model (`readily.baseline`). Its quotes are checked against the two policies only to count how many exist.
+- **What the page reports**, Readily beside the baseline:
+  - Yes or No is right ("covered" counts as Yes, every other verdict as No);
+  - Yes given where the label says otherwise: the dangerous mistake;
+  - exact verdict is right (Readily only);
+  - the expected policy is cited;
+  - search pointed to the expected policy, and which layer did (first pass direct or maybe, exact search, keyword search). This needs the run's search record (`Run.foundBy`), which runs save from phase 8 on; older runs show "not recorded";
+  - quotes that are word for word in the policy.
+- **Per question**: the label (editable), Readily's verdict with a link to the answer, whether the expected policy was cited and found, and the baseline's answer, citation and whether its quote exists.
 
 ---
 
@@ -783,7 +792,7 @@ Build in this order. Do not start a phase until the previous one passes.
 5. **Questionnaire UI.** Start → progress with partial results → results → detail with PDF → approve → export filled form (open it in a PDF reader and confirm Q1, Q12 and Q64 landed in the right fields). Built without the accuracy switches, the differences view and the Policy Guide entry on Home, which belong to phases 6 and 7. `tests/export.test.ts` fills the real form and reads Q1, Q12 and Q64 back.
 6. **Guide.** Section list, find obligations on "(Updated January 2026) Community Supports" (expect two Transitional Rent obligations), highlights, check → `not_found` with a closest policy. `tests/guide.test.ts` covers the sentence splitter on every section of the real Guide, the obligation bookkeeping and the section check, with a simulated API.
 7. **Toggles, estimates, differences view, demo export/replay.** Driven in Chrome against a simulated API: prices follow the switches, the switches lock during a run, a second run at Maximum reuses the first pass and sends only reading and second-opinion calls to Opus, the comparison lists exactly the questions that changed, and an exported demo file opens in a clean browser without a key.
-8. **Accuracy page.**
+8. **Accuracy page.** `tests/eval.test.ts` covers the scoring, the labels file (real questions, real policies) and the baseline with a simulated API. Driven in Chrome against a simulated API: scoring with and without a search record, running the baseline, editing, downloading and resetting labels, the empty state.
 
 Measured cost of one full questionnaire run on defaults: $2.23 (reading every policy $0.71, full reading $0.98, second opinion and tie-breaks $0.49, checklists $0.04), in about 12 minutes at 10 parallel calls. A full run of the three demo Guide sections: about $0.80.
 

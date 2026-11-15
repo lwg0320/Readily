@@ -184,7 +184,7 @@ export const useRunner = create<RunnerState>((set, get) => {
         const questionnaire = await loadQuestionnaire(questionnaireId);
         const apl = await loadApl(questionnaire.aplId);
         patchActive({ stage: "checklist", checklist: { done: 0, total: questionnaire.questions.length } });
-        await runQuestionnaire({
+        const finished = await runQuestionnaire({
           questions: questionnaire.questions,
           apl,
           library,
@@ -200,6 +200,7 @@ export const useRunner = create<RunnerState>((set, get) => {
           },
           onGroupDone: (results) => save({ results: mergeResults(current().results, results) }),
         });
+        save({ foundBy: finished.foundBy });
       });
     },
 

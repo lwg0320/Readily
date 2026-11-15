@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { HashRouter, Route, Routes } from "react-router-dom";
 import { useCatalog } from "../store/catalog";
 import { loadDemos } from "../store/demo";
+import { EvalPage } from "../eval/EvalPage";
 import { useGuides } from "../store/guides";
 import { useRuns } from "../store/runs";
 import { Compare } from "./Compare";
@@ -42,6 +43,7 @@ export function App() {
             <Route path="/run/:runId" element={<Results />} />
             <Route path="/run/:runId/compare/:otherId" element={<Compare />} />
             <Route path="/run/:runId/q/:n" element={<QuestionDetail />} />
+            <Route path="/dev/eval" element={<EvalPage />} />
             <Route path="*" element={<Home />} />
           </Routes>
         )}

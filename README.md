@@ -18,7 +18,7 @@ The full design is in [ARCHITECTURE.md](ARCHITECTURE.md).
 | 5 | Questionnaire screens and form export (`npm run dev`) | Done; every screen driven in Chrome against a simulated API. Not yet run in a browser with a real key. |
 | 6 | Policy Guide screen (`npm run try:section -- s015`) | Done; driven in Chrome against a simulated API. Not yet run with a real key. |
 | 7 | Accuracy switches, run comparison, demo file | Done; driven in Chrome against a simulated API. No run at Maximum accuracy has been made with a real key. |
-| 8 | Accuracy page | Not started |
+| 8 | Accuracy page | Done (checked with a simulated API; no real baseline run yet) |
 
 ## Running the app
 
@@ -48,6 +48,15 @@ Finished work is saved in the browser. A run that is paused, or interrupted by c
 2. **Settings → Export saved work as a demo file.** It downloads `readily-demo.json` (answers and quotes; never the key).
 3. Move that file to `public/demo/readily-demo.json` and change `public/demo/index.json` to `["readily-demo.json"]`.
 4. Commit both. Anyone who opens the site now sees those runs marked "Demo run" and can open, approve and export them. Starting a new run still needs a key.
+
+## Measuring accuracy
+
+**Settings → Accuracy page** scores a saved questionnaire run against hand labels: what a person decided each answer should be after reading the policies.
+
+1. Run the questionnaire (a repeat of a finished run is free, and records which search step found each policy).
+2. On the accuracy page, set the right verdict for each question you have checked yourself. Seven draft labels ship in `src/eval/labels.json`; confirm or change them, and aim for about 20.
+3. **Run the naive baseline** asks the model each labelled question in one prompt with GG.1503 and GG.1550 attached (a few cents). The page then shows Readily beside it: right Yes/No, wrong Yes, right policy cited, and quotes that really exist.
+4. **Download labels.json** and save it over `src/eval/labels.json` to keep your labels.
 
 ## Trying one Policy Guide section from the command line
 

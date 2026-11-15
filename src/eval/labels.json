@@ -1,0 +1,44 @@
+[
+  {
+    "question": 10,
+    "expectedVerdict": "covered",
+    "expectedPolicies": ["GG.1503"],
+    "notes": "Draft by Claude from the policy text; confirm or change. GG.1503 §II.C.2 (certification, six months) and §II.C.4 (signed election instead of other treatment), page 2. §II.B is the Medicare section and must not be cited."
+  },
+  {
+    "question": 11,
+    "expectedVerdict": "conflict",
+    "expectedPolicies": ["GG.1503"],
+    "notes": "Draft by Claude from the policy text; confirm or change. GG.1503 §III.F.1, page 9: notification 'no later than thirty (30) calendar days after start of services'; the APL requires 5 calendar days."
+  },
+  {
+    "question": 12,
+    "expectedVerdict": "conflict",
+    "expectedPolicies": ["GG.1503"],
+    "notes": "Draft by Claude from the policy text; confirm or change. Same 30-day rule in GG.1503 §III.F.1–2, applied to what happens when the election form is late."
+  },
+  {
+    "question": 19,
+    "expectedVerdict": "conflict",
+    "expectedPolicies": ["GG.1503"],
+    "notes": "Draft by Claude from the policy text; confirm or change. GG.1503 §II.F.4, page 4: 'within the next business day or no later than seven (7) calendar days'; the APL requires the next business day."
+  },
+  {
+    "question": 25,
+    "expectedVerdict": "partial",
+    "expectedPolicies": ["GG.1503"],
+    "notes": "Draft by Claude from the policy text; confirm or change. The 12 services are in the Glossary entry 'Hospice Care' (pages 15–16) with §II.A; nothing states the in-network rule for hospice Providers."
+  },
+  {
+    "question": 33,
+    "expectedVerdict": "conflict",
+    "expectedPolicies": ["GG.1503"],
+    "notes": "Draft by Claude from the policy text; confirm or change. GG.1503 §II.M, page 6 says CalOptima 'may provide' ongoing care coordination; the APL says it must be provided."
+  },
+  {
+    "question": 38,
+    "expectedVerdict": "conflict",
+    "expectedPolicies": ["GG.1503"],
+    "notes": "Draft by Claude from the policy text; confirm or change. The table in GG.1503 §II.A.1, page 1 gives Routine Home Care Rev Code 651; the APL lists 0650 for the high rate."
+  }
+]

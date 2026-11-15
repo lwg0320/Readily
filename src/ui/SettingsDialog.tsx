@@ -104,7 +104,12 @@ export function SettingsDialog() {
           </div>
         </div>
 
-        <p className="text-[13px] text-ink-soft">{PRIVACY}</p>
+        <p className="text-[13px] text-ink-soft">
+          {PRIVACY}{" "}
+          <a href="#/dev/eval" className="font-semibold text-stamp" onClick={() => openSettings(false)}>
+            Accuracy page
+          </a>
+        </p>
       </div>
       <div className="flex justify-end border-t border-rule px-6 py-3">
         <Button kind="primary" onClick={() => openSettings(false)}>

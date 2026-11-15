@@ -4,6 +4,7 @@ import { clear, createStore, del, entries, set as idbSet } from "idb-keyval";
 import { create } from "zustand";
 import type { ModelKey, TaskKey } from "../config/models";
 import type { TaskUsage } from "../llm/client";
+import type { FoundByEntry } from "../pipeline/candidates";
 import type { Obligation } from "../pipeline/findObligations";
 import type { ParentResult } from "../types";
 
@@ -31,6 +32,8 @@ export type Run = {
   activeMs?: number;
   usageByTask: Partial<Record<TaskKey, TaskUsage>>;
   results: ParentResult[];
+  /** Which search layer pointed to which policy for which check. Recorded when a run finishes, for the accuracy page. */
+  foundBy?: FoundByEntry[];
 };
 
 const db = createStore("readily-runs", "runs");
